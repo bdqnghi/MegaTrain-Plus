@@ -1,0 +1,46 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / agent tools
+.idea/
+.vscode/
+.claude/
+.codex
+
+# Jupyter
+.ipynb_checkpoints/
+
+# PyTorch / CUDA checkpoints
+*.pt
+*.pth
+*.ckpt
+
+# Logs
+*.log
+wandb/
+
+# Pip install artifacts that sometimes land in the repo root
+=*.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific (examples)
+/dataset/
+/outputs/
+/checkpoints/
