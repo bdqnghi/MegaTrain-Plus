@@ -200,7 +200,16 @@ def main():
             response_field=config.response_field,
             **dataset_kwargs,
         )
-    dataloader = DataLoader(dataset, batch_size=config.batch_size, collate_fn=collate_fn, num_workers=num_workers)
+    # persistent_workers=True prevents re-forking the 40+ GB parent process each
+    # time the iterator cycles. Without this, small datasets trigger ~20s stalls
+    # on every iterator restart. See docs/phase1d_results.md.
+    dataloader = DataLoader(
+        dataset,
+        batch_size=config.batch_size,
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        persistent_workers=(num_workers > 0),
+    )
     data_iter = iter(dataloader)
 
     # Training metrics
