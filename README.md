@@ -16,11 +16,11 @@
 
 ## About
 
-MegaTrain-Plus is a fork of [MegaTrain](https://arxiv.org/abs/2604.05091) (Yuan et al. 2026), the RAM-centric training framework that stores all parameters on CPU and streams them through the GPU layer-by-layer. This fork adds algorithmic and engineering improvements that deliver a clean wall-clock speedup while actually *reducing* GPU memory footprint.
+MegaTrain-Plus provides **full-precision training of large language models on a single NVIDIA DGX Spark**. The largest model validated so far is **Qwen2.5-32B-Instruct** (32.76B parameters); across 12 public models and three architectures (Qwen2.5, Qwen3, Llama via SmolLM2) from 0.36B to 32.76B, every run matches upstream MegaTrain's loss bit-exact.
 
-**Hardware scope.** Every measurement in this README and under [`docs/`](docs/) was taken on a single **NVIDIA DGX Spark** (GB10 Superchip, 128 GB unified LPDDR5X). On this hardware, MegaTrain-Plus is **validated full-precision on 12 public models from 0.36B to 32.76B parameters** (the largest being Qwen2.5-32B-Instruct), with 12/12 bit-exact loss match against upstream MegaTrain. The ~32B ceiling is set by the 128 GB unified-memory envelope rather than by the method: 70B and larger do not fit in 128 GB at BF16 master precision on Spark. Upstream MegaTrain demonstrates 100B+ training on discrete-GPU servers with ~1 TB of host DRAM; that capability is inherited but not re-validated here. See the [Test Environment](#test-environment) section for how the unified-memory architecture affects interpretation of each improvement.
+It is a fork of [MegaTrain](https://arxiv.org/abs/2604.05091) (Yuan et al. 2026), the RAM-centric training framework that stores all parameters on CPU and streams them through the GPU layer-by-layer. This fork adds algorithmic and engineering improvements that deliver a clean wall-clock speedup while actually *reducing* GPU memory footprint. Every improvement is behind a config flag (some default-on, some opt-in) and every wall-clock claim is backed by a reproducible benchmark JSON committed to [`docs/`](docs/).
 
-Every improvement is behind a config flag (some default-on, some opt-in) and every wall-clock claim is backed by a reproducible benchmark JSON committed to [`docs/`](docs/).
+**Hardware scope.** All measurements were taken on a single NVIDIA DGX Spark (GB10 Superchip, 128 GB unified LPDDR5X). The ~32B ceiling is set by the 128 GB unified-memory envelope rather than by the method: 70B and larger do not fit in 128 GB at BF16 master precision on Spark. Upstream MegaTrain demonstrates 100B+ training on discrete-GPU servers with ~1 TB of host DRAM; that capability is inherited but not re-validated here. See the [Test Environment](#test-environment) section for how the unified-memory architecture affects interpretation of each improvement.
 
 **Both the user-facing API and the YAML config format are backward compatible.** Existing MegaTrain configs and scripts work unchanged.
 
