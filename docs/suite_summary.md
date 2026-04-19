@@ -1,6 +1,6 @@
 # MegaTrain-Plus Multi-Model Benchmark Suite
 
-Every wall-clock claim in this file is reproducible via `scripts/benchmark_suite.py`. Raw per-run JSONs are in `docs/suite/`.
+Every wall-clock claim in this file is reproducible via `scripts/benchmark_suite.py`. Raw per-run JSONs are in `docs/benchmarks/suite/`.
 
 ## Setup
 

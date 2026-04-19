@@ -1,4 +1,4 @@
-"""Merge per-model JSONs from docs/suite/ into a single summary table."""
+"""Merge per-model JSONs from docs/benchmarks/suite/ into a single summary table."""
 
 import json
 from pathlib import Path
@@ -11,7 +11,7 @@ def fmt_delta(old: float, new: float) -> str:
 
 
 def main():
-    suite_dir = Path("docs/suite")
+    suite_dir = Path("docs/benchmarks/suite")
     # Pair up baseline + plus files by model slug
     baseline_files = sorted(suite_dir.glob("*_baseline.json"))
     rows = []
@@ -45,7 +45,7 @@ def main():
         "# MegaTrain-Plus Multi-Model Benchmark Suite",
         "",
         "Every wall-clock claim in this file is reproducible via "
-        "`scripts/benchmark_suite.py`. Raw per-run JSONs are in `docs/suite/`.",
+        "`scripts/benchmark_suite.py`. Raw per-run JSONs are in `docs/benchmarks/suite/`.",
         "",
         "## Setup",
         "",

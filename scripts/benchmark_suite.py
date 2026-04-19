@@ -6,7 +6,7 @@ For each model, runs two configurations:
       no zero-copy unflatten, no store-all-activations.
   (b) MegaTrain-Plus full: defaults + store_all_activations.
 
-Writes per-run JSONs to `docs/suite/<model>_{baseline,plus}.json`
+Writes per-run JSONs to `docs/benchmarks/suite/<model>_{baseline,plus}.json`
 and a summary markdown table to `docs/suite_summary.md`.
 
 Usage:
@@ -177,7 +177,7 @@ def main():
     parser.add_argument("--steps", type=int, default=5)
     parser.add_argument("--timeout", type=int, default=600,
                         help="Per-run timeout in seconds")
-    parser.add_argument("--output-dir", type=str, default="docs/suite")
+    parser.add_argument("--output-dir", type=str, default="docs/benchmarks/suite")
     parser.add_argument("--summary", type=str, default="docs/suite_summary.md")
     args = parser.parse_args()
 

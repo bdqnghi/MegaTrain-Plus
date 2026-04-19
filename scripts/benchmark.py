@@ -222,7 +222,7 @@ def run_benchmark(args):
         logger.info(f"  Peak CPU mem:   {summary['peak_cpu_GB']:.2f} GB")
 
     # Save results
-    out_path = args.output or "docs/baseline_profile.json"
+    out_path = args.output or "docs/benchmarks/baseline_profile.json"
     os.makedirs(os.path.dirname(out_path) if os.path.dirname(out_path) else ".", exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
