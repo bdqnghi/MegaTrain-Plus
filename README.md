@@ -28,7 +28,7 @@ Every improvement is behind a config flag (some default-on, some opt-in) and eve
 
 MegaTrain's value on DGX Spark is a **memory-allocator trick**, not a bandwidth trick. The 128 GB unified pool is organized so the CUDA allocator holds only a transient working set, while the bulk of persistent training state sits in the lean CPU-side allocator. Three diagrams:
 
-### The capacity trick — where the bytes sit
+### The capacity trick: where the bytes sit
 
 ```
 DGX Spark: 128 GB unified LPDDR5X  (one physical pool)
@@ -61,9 +61,9 @@ Ceiling: ~2–3B params              └─────────────�
                                    mode this suite uses)
 ```
 
-Same physical memory, different accounting. Moving the 12 B/param of optimizer state (FP32 master + Adam m + Adam v) off the CUDA allocator is what lifts the ceiling — the CUDA allocator is greedy and fragments, while the CPU allocator packs lean.
+Same physical memory, different accounting. Moving the 12 B/param of optimizer state (FP32 master + Adam m + Adam v) off the CUDA allocator is what lifts the ceiling. The CUDA allocator is greedy and fragments, while the CPU allocator packs lean.
 
-### The streaming mechanism — how a forward pass runs
+### The streaming mechanism: how a forward pass runs
 
 ```
 Layer-by-layer streaming with ping-pong buffers
@@ -131,7 +131,7 @@ While compute works on buffer A, the DMA engine silently fills buffer B with the
         └──────────────────────────────────────────────┘
 ```
 
-On a discrete H100 + host server, these two views map to **two different physical tiers**: a 1 TB+ DDR host pool and 80 GB HBM connected by ~50 GB/s PCIe. That is the hardware context that makes upstream MegaTrain's "100B on a single GPU" demonstration possible — the large cheap tier holds what the small expensive tier can't. On DGX Spark both views land in the same 128 GB LPDDR5X, so the method still works as an allocator-organization tool, but the size ceiling is set by total package memory rather than by the size of a separate host tier.
+On a discrete H100 + host server, these two views map to **two different physical tiers**: a 1 TB+ DDR host pool and 80 GB HBM connected by ~50 GB/s PCIe. That is the hardware context that makes upstream MegaTrain's "100B on a single GPU" demonstration possible. The large cheap tier holds what the small expensive tier can't. On DGX Spark both views land in the same 128 GB LPDDR5X, so the method still works as an allocator-organization tool, but the size ceiling is set by total package memory rather than by the size of a separate host tier.
 
 ## Improvements
 
