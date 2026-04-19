@@ -92,6 +92,13 @@ def yaml_to_training_config(yaml_config: Dict[str, Any]) -> CPUMasterConfig:
         # Memory
         checkpoint_interval=memory_cfg.get('checkpoint_interval', 4),
         num_grad_slabs=memory_cfg.get('num_grad_slabs', 12),
+        num_buffers=memory_cfg.get('num_buffers', 3),
+        backward_prefetch=memory_cfg.get('backward_prefetch', True),
+        store_all_activations=memory_cfg.get('store_all_activations', False),
+        zero_copy_unflatten=memory_cfg.get('zero_copy_unflatten', True),
+
+        # Transfer quantization
+        weight_transfer_dtype=yaml_config.get('quantization', {}).get('weight_transfer_dtype', 'bfloat16'),
 
         # Logging
         log_interval=logging_cfg.get('log_interval', 1),

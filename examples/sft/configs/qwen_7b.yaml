@@ -31,6 +31,11 @@ optimizer:
 memory:
   checkpoint_interval: 4
   num_grad_slabs: 12
+  num_buffers: 3
+  backward_prefetch: true
+  # Phase 3: set true to get ~25-30% backward speedup at +150-600MB GPU cost.
+  # Enable when batch * seq_len * hidden * 2 * (n_layers - n_checkpoints) fits GPU headroom.
+  store_all_activations: true
 
 logging:
   log_interval: 1
