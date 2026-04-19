@@ -89,6 +89,14 @@ class CPUMasterConfig:
     # infrastructure for slower PCIe / SIMD-accelerated hosts / amortized variants.
     weight_transfer_dtype: str = "bfloat16"
 
+    # Phase 3: trade GPU memory for compute by storing all activations during
+    # forward and skipping the per-block recompute in backward. Extra GPU memory
+    # cost: (N_layers - N_checkpoints) * B * T * H * 2 bytes (BF16).
+    # For Qwen2.5-7B, batch=2, seq=512: ~150 MB. Safe for most 80 GB GPU
+    # configurations. Opt-in via YAML since very long sequences / very large
+    # batches can push past available headroom.
+    store_all_activations: bool = False
+
     # Logging
     log_interval: int = 1
     enable_timing: bool = True

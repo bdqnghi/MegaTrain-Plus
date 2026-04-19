@@ -1085,7 +1085,7 @@ class CPUMasterModel:
                 buffer_idx = i % self.num_buffers
                 next_buffer_idx = (i + 1) % self.num_buffers
 
-                if i % self.config.checkpoint_interval == 0:
+                if self.config.store_all_activations or (i % self.config.checkpoint_interval == 0):
                     checkpoints[i] = hidden.detach()
 
                 if i + 1 < len(self.cpu_layers):
@@ -1197,7 +1197,7 @@ class CPUMasterModel:
                 buffer_idx = i % self.num_buffers
                 next_buffer_idx = (i + 1) % self.num_buffers
 
-                if i % self.config.checkpoint_interval == 0:
+                if self.config.store_all_activations or (i % self.config.checkpoint_interval == 0):
                     checkpoints[i] = hidden.detach()
 
                 if i + 1 < len(self.cpu_layers):
@@ -1317,40 +1317,41 @@ class CPUMasterModel:
 
             current_checkpoint = checkpoints[block_start]
 
-            # Recompute block
+            # Phase 3: skip recompute when full activations are stored.
             recompute_cache = {}
-            hidden_recompute = current_checkpoint
+            if not self.config.store_all_activations:
+                hidden_recompute = current_checkpoint
 
-            with torch.no_grad():
-                if self.config.backward_prefetch:
-                    # Phase 1A: prefetch first layer of block
-                    first_buf = block_start % self.num_buffers
-                    self._load_layer_to_buffer_async(block_start, first_buf)
-
-                for j in range(block_start, block_end):
-                    buffer_idx = j % self.num_buffers
-                    next_buffer_idx = (j + 1) % self.num_buffers
-
+                with torch.no_grad():
                     if self.config.backward_prefetch:
-                        # Prefetch next recompute layer while computing current
-                        if j + 1 < block_end:
-                            self._load_layer_to_buffer_async(j + 1, next_buffer_idx)
-                    else:
-                        # Original serial load-then-wait behavior
-                        self._load_layer_to_buffer_async(j, buffer_idx)
+                        # Phase 1A: prefetch first layer of block
+                        first_buf = block_start % self.num_buffers
+                        self._load_layer_to_buffer_async(block_start, first_buf)
 
-                    self.compute_stream.wait_event(self.weight_ready_events[buffer_idx])
+                    for j in range(block_start, block_end):
+                        buffer_idx = j % self.num_buffers
+                        next_buffer_idx = (j + 1) % self.num_buffers
 
-                    with torch.cuda.stream(self.compute_stream):
-                        self._unflatten_to_layer(j, buffer_idx)
-                        self.buffer_busy_events[buffer_idx].record(self.compute_stream)
+                        if self.config.backward_prefetch:
+                            # Prefetch next recompute layer while computing current
+                            if j + 1 < block_end:
+                                self._load_layer_to_buffer_async(j + 1, next_buffer_idx)
+                        else:
+                            # Original serial load-then-wait behavior
+                            self._load_layer_to_buffer_async(j, buffer_idx)
 
-                        gpu_layer = self._get_gpu_layer(j, buffer_idx)
-                        out = gpu_layer(hidden_recompute, **layer_kwargs)
-                        hidden_recompute = out[0] if isinstance(out, tuple) else out
+                        self.compute_stream.wait_event(self.weight_ready_events[buffer_idx])
 
-                    recompute_cache[j] = hidden_recompute.detach()
-                    del out
+                        with torch.cuda.stream(self.compute_stream):
+                            self._unflatten_to_layer(j, buffer_idx)
+                            self.buffer_busy_events[buffer_idx].record(self.compute_stream)
+
+                            gpu_layer = self._get_gpu_layer(j, buffer_idx)
+                            out = gpu_layer(hidden_recompute, **layer_kwargs)
+                            hidden_recompute = out[0] if isinstance(out, tuple) else out
+
+                        recompute_cache[j] = hidden_recompute.detach()
+                        del out
 
             # Backward through block
             if self.config.backward_prefetch:
@@ -1362,7 +1363,10 @@ class CPUMasterModel:
                 buffer_idx = i % self.num_buffers
                 next_buffer_idx = (i - 1) % self.num_buffers
 
-                if i == block_start:
+                if self.config.store_all_activations:
+                    # Phase 3: use the stored input to layer i directly.
+                    layer_input = checkpoints[i].detach().requires_grad_(True)
+                elif i == block_start:
                     layer_input = current_checkpoint.detach().requires_grad_(True)
                 else:
                     layer_input = recompute_cache[i - 1].requires_grad_(True)
@@ -1564,37 +1568,39 @@ class CPUMasterModel:
             block_end = min((block_idx + 1) * self.config.checkpoint_interval, len(self.cpu_layers))
 
             current_checkpoint = checkpoints[block_start]
+            # Phase 3: skip recompute when full activations are stored.
             recompute_cache = {}
-            hidden_recompute = current_checkpoint
+            if not self.config.store_all_activations:
+                hidden_recompute = current_checkpoint
 
-            with torch.no_grad():
-                if self.config.backward_prefetch:
-                    # Phase 1A: prefetch first layer of block
-                    first_buf = block_start % self.num_buffers
-                    self._load_layer_to_buffer_async(block_start, first_buf)
-
-                for j in range(block_start, block_end):
-                    buffer_idx = j % self.num_buffers
-                    next_buffer_idx = (j + 1) % self.num_buffers
-
+                with torch.no_grad():
                     if self.config.backward_prefetch:
-                        if j + 1 < block_end:
-                            self._load_layer_to_buffer_async(j + 1, next_buffer_idx)
-                    else:
-                        self._load_layer_to_buffer_async(j, buffer_idx)
+                        # Phase 1A: prefetch first layer of block
+                        first_buf = block_start % self.num_buffers
+                        self._load_layer_to_buffer_async(block_start, first_buf)
 
-                    self.compute_stream.wait_event(self.weight_ready_events[buffer_idx])
+                    for j in range(block_start, block_end):
+                        buffer_idx = j % self.num_buffers
+                        next_buffer_idx = (j + 1) % self.num_buffers
 
-                    with torch.cuda.stream(self.compute_stream):
-                        self._unflatten_to_layer(j, buffer_idx)
-                        self.buffer_busy_events[buffer_idx].record(self.compute_stream)
+                        if self.config.backward_prefetch:
+                            if j + 1 < block_end:
+                                self._load_layer_to_buffer_async(j + 1, next_buffer_idx)
+                        else:
+                            self._load_layer_to_buffer_async(j, buffer_idx)
 
-                        gpu_layer = self._get_gpu_layer(j, buffer_idx)
-                        out = gpu_layer(hidden_recompute, **layer_kwargs)
-                        hidden_recompute = out[0] if isinstance(out, tuple) else out
+                        self.compute_stream.wait_event(self.weight_ready_events[buffer_idx])
 
-                    recompute_cache[j] = hidden_recompute.detach()
-                    del out
+                        with torch.cuda.stream(self.compute_stream):
+                            self._unflatten_to_layer(j, buffer_idx)
+                            self.buffer_busy_events[buffer_idx].record(self.compute_stream)
+
+                            gpu_layer = self._get_gpu_layer(j, buffer_idx)
+                            out = gpu_layer(hidden_recompute, **layer_kwargs)
+                            hidden_recompute = out[0] if isinstance(out, tuple) else out
+
+                        recompute_cache[j] = hidden_recompute.detach()
+                        del out
 
             if self.config.backward_prefetch:
                 # Phase 1A: prefetch last layer of block (first to be processed in reverse)
@@ -1605,7 +1611,10 @@ class CPUMasterModel:
                 buffer_idx = i % self.num_buffers
                 next_buffer_idx = (i - 1) % self.num_buffers
 
-                if i == block_start:
+                if self.config.store_all_activations:
+                    # Phase 3: use the stored input to layer i directly.
+                    layer_input = checkpoints[i].detach().requires_grad_(True)
+                elif i == block_start:
                     layer_input = current_checkpoint.detach().requires_grad_(True)
                 else:
                     layer_input = recompute_cache[i - 1].requires_grad_(True)
