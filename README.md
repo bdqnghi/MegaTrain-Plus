@@ -323,11 +323,13 @@ If you use MegaTrain-Plus in your work, please cite both the upstream paper and 
 }
 
 @misc{megatrainplus2026,
-      title={MegaTrain-Plus: algorithmic improvements for single-GPU 100B+ training},
+      title={MegaTrain-Plus: algorithmic improvements for single-GPU CPU-offloaded training},
       author={Bui, Nghi D. Q.},
       year={2026},
       url={https://github.com/bdqnghi/MegaTrain-Plus},
-      note={Fork of MegaTrain with -30\% step time and -290 MB GPU memory at bit-exact identical loss.},
+      note={Fork of MegaTrain with skip-recompute and zero-copy unflatten optimizations.
+            Validated on NVIDIA DGX Spark across 12 models from 0.36B to 32.76B parameters
+            with bit-exact identical loss.},
 }
 ```
 
