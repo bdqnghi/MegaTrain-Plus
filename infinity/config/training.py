@@ -97,6 +97,15 @@ class CPUMasterConfig:
     # batches can push past available headroom.
     store_all_activations: bool = False
 
+    # Phase 5: zero-copy unflatten. Bind template param `.data` directly to views
+    # of the flat GPU buffer, eliminating the ~6ms/layer memcpy in
+    # _unflatten_to_layer. -8% step time AND -440 MB GPU memory (templates no
+    # longer hold separate copies). Auto-disabled when weight_transfer_dtype != "bfloat16".
+    zero_copy_unflatten: bool = True
+
+    # Diagnostics (do not enable in production — adds torch.cuda.synchronize).
+    diagnostic_block_timing: bool = False
+
     # Logging
     log_interval: int = 1
     enable_timing: bool = True

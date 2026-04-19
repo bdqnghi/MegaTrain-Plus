@@ -484,11 +484,25 @@ class CPUMasterModel:
         # Phase 4b: cache list(template.parameters()) per template so hot paths
         # don't re-traverse the module tree on every call.
         self.gpu_template_params = {}  # {group_id: [[p for p in template_0.parameters()], ...]}
+
+        # Phase 5: zero-copy unflatten. Rebind each template's .data to views
+        # of the corresponding flat buffer so we can skip the ~6ms/layer memcpy.
+        # FP8 transfer still needs a dequant memcpy, so we force-disable there.
+        self._zero_copy_unflatten = (
+            getattr(config, "zero_copy_unflatten", False)
+            and self._weight_quantizer is None
+        )
+        if self._zero_copy_unflatten:
+            logger.info("Zero-copy unflatten ENABLED — template params aliased to flat GPU buffers.")
+
         for gid, group in self.layer_groups.items():
             representative_idx = group['indices'][0]
+            # All layers in a group share identical param shapes (that's the grouping criterion).
+            group_numels = self.layer_param_numel[representative_idx]
+            group_shapes = self.layer_param_shapes[representative_idx]
             templates = []
             templates_params = []
-            for _ in range(self.num_buffers):
+            for buffer_idx in range(self.num_buffers):
                 template = copy.deepcopy(self.cpu_layers[representative_idx])
                 # Preserve attention implementation before moving to GPU
                 _preserve_attn_implementation(template, self._model_config)
@@ -496,6 +510,16 @@ class CPUMasterModel:
                 # Ensure no autograd graph is attached to template parameters
                 for p in template.parameters():
                     p.requires_grad_(False)
+
+                if self._zero_copy_unflatten:
+                    # Rebind .data to a view of the flat buffer for this buffer slot.
+                    # After this, layer forward reads directly from flat_buffer via p.
+                    flat = self.gpu_flat_buffers[buffer_idx]
+                    offset = 0
+                    for p, n, shape in zip(template.parameters(), group_numels, group_shapes):
+                        p.data = flat[offset:offset + n].view(shape)
+                        offset += n
+
                 templates.append(template)
                 templates_params.append(list(template.parameters()))
             self.gpu_layer_templates[gid] = templates
@@ -677,14 +701,22 @@ class CPUMasterModel:
         self.gpu_template_params = {}
         for gid, group in self.layer_groups.items():
             representative_idx = group['indices'][0]
+            group_numels = self.layer_param_numel[representative_idx]
+            group_shapes = self.layer_param_shapes[representative_idx]
             templates = []
             templates_params = []
-            for _ in range(self.num_buffers):
+            for buffer_idx in range(self.num_buffers):
                 template = copy.deepcopy(self.cpu_layers[representative_idx])
                 _preserve_attn_implementation(template, self._model_config)
                 template = template.to(self.device)
                 for p in template.parameters():
                     p.requires_grad_(False)
+                if self._zero_copy_unflatten:
+                    flat = self.gpu_flat_buffers[buffer_idx]
+                    offset = 0
+                    for p, n, shape in zip(template.parameters(), group_numels, group_shapes):
+                        p.data = flat[offset:offset + n].view(shape)
+                        offset += n
                 templates.append(template)
                 templates_params.append(list(template.parameters()))
             self.gpu_layer_templates[gid] = templates
@@ -721,6 +753,17 @@ class CPUMasterModel:
         """Get the cached parameter list for a given template (avoids re-traversing the module tree)."""
         group_id = self.layer_to_group[layer_idx]
         return self.gpu_template_params[group_id][buffer_idx]
+
+    def _signal_buffer_free_after_compute(self, buffer_idx):
+        """Record buffer_free on compute_stream after the layer's compute finishes.
+
+        Required when Phase 5 zero-copy unflatten is on (the layer is still
+        reading from the buffer during compute, so we can't free it until
+        compute ends). In the memcpy path, buffer_free is recorded inside
+        _unflatten_to_layer right after the copy.
+        """
+        if self._zero_copy_unflatten:
+            self.buffer_free_events[buffer_idx].record(self.compute_stream)
 
     def _grad_worker(self):
         """CPU worker thread: wait for D2H completion, accumulate gradients, return slab to pool."""
@@ -838,15 +881,21 @@ class CPUMasterModel:
 
         Default path: memcpy the flat buffer into the template params.
 
-        Phase 2 FP8 dequant path: the flat buffer holds INT8/FP8 payload; we
+        Phase 2 FP8 dequant path: the flat buffer holds FP8 payload; we
         dequantize into template params via `WeightTransferQuantizer`.
-        """
-        flat = self.gpu_flat_buffers[buffer_idx]
-        gpu_layer = self._get_gpu_layer(layer_idx, buffer_idx)
 
+        Phase 5 zero-copy path: template params are pre-bound to views of the
+        flat buffer at init time, so this is a no-op. The caller records
+        buffer_free AFTER layer compute via `_signal_buffer_free_after_compute`.
+        """
         # Wait for template to be free (grad D2H from previous use must complete)
         self.compute_stream.wait_event(self.template_free_events[buffer_idx])
 
+        if self._zero_copy_unflatten:
+            # Phase 5: nothing to do — template params already alias the flat buffer.
+            return
+
+        flat = self.gpu_flat_buffers[buffer_idx]
         gpu_params = self._get_gpu_layer_params(layer_idx, buffer_idx)  # Phase 4b: cached
 
         if self._weight_quantizer is None:
@@ -1122,6 +1171,7 @@ class CPUMasterModel:
                     gpu_layer = self._get_gpu_layer(i, buffer_idx)
                     out = gpu_layer(hidden, **layer_kwargs)
                     hidden = out[0] if isinstance(out, tuple) else out
+                    self._signal_buffer_free_after_compute(buffer_idx)
 
         checkpoints[len(self.cpu_layers)] = hidden.detach()
 
@@ -1234,6 +1284,7 @@ class CPUMasterModel:
                     gpu_layer = self._get_gpu_layer(i, buffer_idx)
                     out = gpu_layer(hidden, **layer_kwargs)
                     hidden = out[0] if isinstance(out, tuple) else out
+                    self._signal_buffer_free_after_compute(buffer_idx)
 
         checkpoints[len(self.cpu_layers)] = hidden.detach()
 
@@ -1371,6 +1422,7 @@ class CPUMasterModel:
                             gpu_layer = self._get_gpu_layer(j, buffer_idx)
                             out = gpu_layer(hidden_recompute, **layer_kwargs)
                             hidden_recompute = out[0] if isinstance(out, tuple) else out
+                            self._signal_buffer_free_after_compute(buffer_idx)
 
                         recompute_cache[j] = hidden_recompute.detach()
                         del out
@@ -1436,6 +1488,7 @@ class CPUMasterModel:
                         p.requires_grad_(False)
 
                     self.backward_done_events[buffer_idx].record(self.compute_stream)
+                    self._signal_buffer_free_after_compute(buffer_idx)
 
                 self._collect_layer_grads_async(i, buffer_idx)
 
@@ -1621,6 +1674,7 @@ class CPUMasterModel:
                             gpu_layer = self._get_gpu_layer(j, buffer_idx)
                             out = gpu_layer(hidden_recompute, **layer_kwargs)
                             hidden_recompute = out[0] if isinstance(out, tuple) else out
+                            self._signal_buffer_free_after_compute(buffer_idx)
 
                         recompute_cache[j] = hidden_recompute.detach()
                         del out
@@ -1681,6 +1735,7 @@ class CPUMasterModel:
                         p.requires_grad_(False)
 
                     self.backward_done_events[buffer_idx].record(self.compute_stream)
+                    self._signal_buffer_free_after_compute(buffer_idx)
 
                 self._collect_layer_grads_async(i, buffer_idx)
 
