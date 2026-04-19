@@ -2,7 +2,7 @@
 
 # MegaTrain-Plus
 
-### A faster, leaner fork of MegaTrain — full-precision 100B+ training on a single GPU
+### A faster, leaner fork of MegaTrain. Full-precision 100B+ training on a single GPU.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
@@ -16,11 +16,11 @@
 
 ## About
 
-MegaTrain-Plus is a fork of [MegaTrain](https://arxiv.org/abs/2604.05091) (Yuan et al. 2026) — the RAM-centric single-GPU training framework that stores all parameters on CPU and streams them through GPU layer-by-layer. The original MegaTrain made it possible to train 100B+ models on a single GPU for SFT and RL post-training.
+MegaTrain-Plus is a fork of [MegaTrain](https://arxiv.org/abs/2604.05091) (Yuan et al. 2026), the RAM-centric single-GPU training framework that stores all parameters on CPU and streams them through GPU layer-by-layer. The original MegaTrain made it possible to train 100B+ models on a single GPU for SFT and RL post-training.
 
 This fork keeps the architecture intact and adds a series of **algorithmic and engineering improvements** that collectively deliver a clean wall-clock speedup while actually *reducing* GPU memory footprint. Every improvement is behind a config flag (some default-on, some opt-in) and every wall-clock claim is backed by a reproducible benchmark JSON committed to [`docs/`](docs/).
 
-**Both the user-facing API and the YAML config format are backward compatible** — existing MegaTrain configs and scripts work unchanged.
+**Both the user-facing API and the YAML config format are backward compatible.** Existing MegaTrain configs and scripts work unchanged.
 
 ## Improvements
 
@@ -36,7 +36,7 @@ This fork keeps the architecture intact and adds a series of **algorithmic and e
 
 The two biggest wins come from re-reading the hot path and asking *"what work are we doing that isn't actually necessary?"* rather than from PCIe, quantization, or multi-GPU categories:
 
-1. **Skip recompute.** The backward pass was forward-computing each layer twice per step — once in the recompute loop and once again to build an autograd graph. Storing every layer's input during the initial forward lets the backward use those directly.
+1. **Skip recompute.** The backward pass was forward-computing each layer twice per step: once in the recompute loop and once again to build an autograd graph. Storing every layer's input during the initial forward lets the backward use those directly.
 2. **Zero-copy unflatten.** Each layer compute was preceded by a 444 MB GPU→GPU memcpy from the flat buffer into a separate template. Pointing the template parameters' `.data` at views of the flat buffer removes the copy entirely and drops peak GPU memory.
 
 Also included:
@@ -56,9 +56,9 @@ Qwen2.5-7B, batch=2, seq=512, single GPU, RAM-safe benchmark (no optimizer step)
 | Throughput (tok/s) | 284.1 | **403.3** | **+42.0%** |
 | Peak GPU memory | 7.15 GB | **6.86 GB** | **-290 MB** |
 | BWD/FWD ratio | 3.28x | **2.44x** | approaches theoretical ~2x |
-| Loss trajectory | baseline | **bit-exact identical** | — |
+| Loss trajectory | baseline | **bit-exact identical** | same |
 
-Both **faster** AND **less GPU memory**. The reason memory goes down: Phase 5 lets the layer templates alias the flat GPU buffer instead of holding their own copies, so `(1 + N_buffers) × layer_size` becomes `N_buffers × layer_size` per structure group.
+Both **faster** AND **less GPU memory**. The reason memory goes down: the zero-copy unflatten optimization lets the layer templates alias the flat GPU buffer instead of holding their own copies, so `(1 + N_buffers) × layer_size` becomes `N_buffers × layer_size` per structure group.
 
 Reproduce:
 ```bash
@@ -67,7 +67,7 @@ python scripts/benchmark.py --model Qwen/Qwen2.5-7B-Instruct \
     --batch-size 2 --seq-len 512 --steps 5 --no-optimizer \
     --num-buffers 2 --no-backward-prefetch --no-zero-copy-unflatten
 
-# MegaTrain-Plus (defaults + Phase 3 opt-in)
+# MegaTrain-Plus (defaults + `store_all_activations` opt-in)
 python scripts/benchmark.py --model Qwen/Qwen2.5-7B-Instruct \
     --batch-size 2 --seq-len 512 --steps 5 --no-optimizer \
     --store-all-activations
@@ -88,13 +88,13 @@ pip install flash-attn                             # memory-efficient attention
 pip install deepspeed                              # SIMD CPUAdam (needs `ninja`)
 pip install ninja                                  # C++ extension compiler
 
-# SFT — Qwen2.5-7B with MetaMathQA (downloads on first run)
+# SFT: Qwen2.5-7B with MetaMathQA (downloads on first run)
 python examples/sft/train.py --config examples/sft/configs/qwen_7b.yaml
 
-# SFT — any supported model
+# SFT: any supported model
 python examples/sft/train.py --config examples/sft/configs/llama3_8b.yaml
 
-# RL (GRPO) — single-GPU via VERL + SGLang
+# RL (GRPO): single-GPU via VERL + SGLang
 CUDA_VISIBLE_DEVICES=0 bash examples/rl/run_qwen2_5_7b_megatrain.sh
 ```
 
@@ -111,35 +111,35 @@ MegaTrain-Plus adds five config fields. Defaults reflect the measured results ab
 memory:
   checkpoint_interval: 4        # layers per gradient-checkpoint block
   num_grad_slabs: 12
-  num_buffers: 3                # Phase 1B: GPU flat buffer count
-  backward_prefetch: true       # Phase 1A: prefetch next layer in backward
-  store_all_activations: true   # Phase 3: skip recompute (+25-30% throughput)
-  zero_copy_unflatten: true     # Phase 5: template params alias flat buffer
+  num_buffers: 3                # GPU flat buffer count (2=double, 3=triple)
+  backward_prefetch: true       # prefetch next layer in the backward loops
+  store_all_activations: true   # store every layer's input, skip recompute in backward (+25-30% throughput)
+  zero_copy_unflatten: true     # template params alias the flat buffer; no per-layer memcpy
 
 quantization:
-  weight_transfer_dtype: "bfloat16"   # "float8_e4m3" = Phase 2 (opt-in, currently slower)
+  weight_transfer_dtype: "bfloat16"   # "float8_e4m3" opts into FP8 weight transfer (currently slower on commodity CPUs)
 ```
 
-Unknown keys are ignored with defaults — older MegaTrain configs work unchanged.
+Unknown keys are ignored with defaults. Older MegaTrain configs work unchanged.
 
 **Memory note**: `store_all_activations: true` adds `(N_layers - N_checkpoints) * B * T * H * 2` bytes of GPU memory for activation storage. On Qwen2.5-7B with `checkpoint_interval=4`, that's ~150 MB at batch=2/seq=512 and ~600 MB at batch=8/seq=512. Disable if your GPU is tight on headroom.
 
 ## Supported Models
 
-MegaTrain-Plus inherits universal HuggingFace support from upstream MegaTrain — any decoder-only LLM or vision-language model works through `AutoModelForCausalLM` / `AutoModelForImageTextToText` with automatic structure discovery.
+MegaTrain-Plus inherits universal HuggingFace support from upstream MegaTrain. Any decoder-only LLM or vision-language model works through `AutoModelForCausalLM` / `AutoModelForImageTextToText` with automatic structure discovery.
 
 Tested families: Qwen2/2.5/3/3.5, Qwen3-Next, Llama 2/3/4, Mistral, Mixtral, DeepSeek, Phi-3/4, Gemma 2/3, GLM-4/4.5, InternLM, Yi, Baichuan, GPT-OSS, plus VLMs (Qwen2-VL, Qwen2.5-VL, Qwen3-VL, LLaVA, InternVL, MiniCPM-V, Gemma 3 VL). See [`examples/sft/configs/`](examples/sft/configs/) for ready-made configs.
 
 ## RL Training (GRPO)
 
-MegaTrain-Plus retains the full upstream VERL + SGLang RL integration. Single-GPU GRPO on Qwen2.5-7B or Qwen3.5-27B uses MegaTrain as the actor/reference training backend and SGLang (FP8) as the rollout engine — all three models coexist on one GPU without weight reloading.
+MegaTrain-Plus retains the full upstream VERL + SGLang RL integration. Single-GPU GRPO on Qwen2.5-7B or Qwen3.5-27B uses MegaTrain as the actor/reference training backend and SGLang (FP8) as the rollout engine, so all three models coexist on one GPU without weight reloading.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 bash examples/rl/run_qwen2_5_7b_megatrain.sh
 CUDA_VISIBLE_DEVICES=0 bash examples/rl/run_qwen3_5_27b_megatrain.sh
 ```
 
-MegaTrain-Plus's Phase 3/5 improvements apply transparently to the actor training phase. The VERL engine code lives at [`verl/verl/workers/engine/megatrain/`](verl/verl/workers/engine/megatrain/).
+The skip-recompute and zero-copy-unflatten optimizations apply transparently to the actor training phase. The VERL engine code lives at [`verl/verl/workers/engine/megatrain/`](verl/verl/workers/engine/megatrain/).
 
 ## Data
 
@@ -158,18 +158,18 @@ Supports alpaca format, sharegpt format, local JSON/JSONL, and HuggingFace Hub d
 
 The `docs/` directory is organized as follows:
 
-- **[status.md](docs/status.md)** — single source of truth, recommended entry point
-- **[progress_summary.md](docs/progress_summary.md)** — running tally of what's landed
-- **Per-phase deep-dives**:
-  - [phase1_results.md](docs/phase1_results.md) — Phase 1A/1B
-  - [phase1d_results.md](docs/phase1d_results.md) — DataLoader fork artifact investigation
-  - [phase2_results.md](docs/phase2_results.md) — FP8 weight transfer (why it isn't a win yet)
-  - [phase3_results.md](docs/phase3_results.md) — **skip recompute (-30% backward)**
-  - [phase5_results.md](docs/phase5_results.md) — **zero-copy unflatten (-8% step, -440 MB)**
+- **[status.md](docs/status.md)**: single source of truth, recommended entry point
+- **[progress_summary.md](docs/progress_summary.md)**: running tally of what's landed
+- **Deep-dives on each improvement**:
+  - [phase1_results.md](docs/phase1_results.md): backward prefetching + triple buffering
+  - [phase1d_results.md](docs/phase1d_results.md): DataLoader fork artifact investigation
+  - [phase2_results.md](docs/phase2_results.md): FP8 weight transfer (why it isn't a win yet)
+  - [phase3_results.md](docs/phase3_results.md): **skip recompute (-30% backward)**
+  - [phase5_results.md](docs/phase5_results.md): **zero-copy unflatten (-8% step, -440 MB)**
 - **Historical context**:
-  - [megatrain-plus-plan.md](docs/megatrain-plus-plan.md) — original plan with retrospective
-  - [megatrain-plus-critique.md](docs/megatrain-plus-critique.md) — Codex critique of the plan
-  - [gemini_comment.md](docs/gemini_comment.md) — Gemini technical analysis
+  - [megatrain-plus-plan.md](docs/megatrain-plus-plan.md): original plan with retrospective
+  - [megatrain-plus-critique.md](docs/megatrain-plus-critique.md): Codex critique of the plan
+  - [gemini_comment.md](docs/gemini_comment.md): Gemini technical analysis
 - **Benchmark JSONs**: ~25 files covering every wall-clock claim made in the docs
 
 ## Profiling Tools
@@ -178,13 +178,13 @@ The `docs/` directory is organized as follows:
 # End-to-end step timing benchmark with A/B flags
 scripts/benchmark.py
 
-# Measure _unflatten_to_layer cost vs layer forward compute (motivated Phase 5)
+# Measure _unflatten_to_layer cost vs layer forward compute (motivated the zero-copy unflatten work)
 scripts/profile_unflatten.py
 
 # Isolate per-layer backward compute vs pipeline overhead
 scripts/profile_backward_scaling.py
 
-# Measure CPU-side FP8 pack cost vs PCIe savings (motivated Phase 2's "opt-in" status)
+# Measure CPU-side FP8 pack cost vs PCIe savings (motivated keeping FP8 weight transfer opt-in)
 scripts/profile_quant_cost.py
 
 # Correctness test for FP8 weight quantizer
@@ -195,7 +195,7 @@ scripts/test_weight_quant.py
 
 <details><summary><b>OOM when enabling <code>store_all_activations</code>?</b></summary>
 
-At large batch / long sequence, Phase 3's extra activation storage can push past your GPU budget. Either:
+At large batch or long sequence, the extra activation storage from `store_all_activations: true` can push past your GPU budget. Either:
 - Disable: `store_all_activations: false` in your YAML
 - Reduce `batch_size` or `max_seq_len`
 - Increase `checkpoint_interval` (more layers per block → fewer stored activations)
@@ -256,13 +256,13 @@ If you use MegaTrain-Plus in your work, please cite both the upstream paper and 
 
 ## Acknowledgements
 
-- **[MegaTrain](https://github.com/DLYuanGod/MegaTrain)** (Yuan et al.) — the underlying architecture this fork builds on. All credit for the RAM-centric CPU-offload design belongs to the original authors.
-- **[VERL](https://github.com/verl-project/verl)** — RL post-training framework integrated for single-GPU GRPO.
-- **[LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory)** — dataset registry design that the data pipeline borrows from.
-- **[HuggingFace Transformers](https://github.com/huggingface/transformers)** — universal model loading.
-- **[Flash Attention](https://github.com/Dao-AILab/flash-attention)** / **[Flash Linear Attention](https://github.com/fla-org/flash-linear-attention)** — attention kernels.
-- **[DeepSpeed](https://github.com/microsoft/DeepSpeed)** — CPUAdam.
-- **[SGLang](https://github.com/sgl-project/sglang)** — FP8 rollout inference.
+- **[MegaTrain](https://github.com/DLYuanGod/MegaTrain)** (Yuan et al.): the underlying architecture this fork builds on. All credit for the RAM-centric CPU-offload design belongs to the original authors.
+- **[VERL](https://github.com/verl-project/verl)**: RL post-training framework integrated for single-GPU GRPO.
+- **[LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory)**: dataset registry design that the data pipeline borrows from.
+- **[HuggingFace Transformers](https://github.com/huggingface/transformers)**: universal model loading.
+- **[Flash Attention](https://github.com/Dao-AILab/flash-attention)** / **[Flash Linear Attention](https://github.com/fla-org/flash-linear-attention)**: attention kernels.
+- **[DeepSpeed](https://github.com/microsoft/DeepSpeed)**: CPUAdam.
+- **[SGLang](https://github.com/sgl-project/sglang)**: FP8 rollout inference.
 
 ## License
 
