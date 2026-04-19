@@ -20,6 +20,8 @@ MegaTrain-Plus is a fork of [MegaTrain](https://arxiv.org/abs/2604.05091) (Yuan 
 
 This fork keeps the architecture intact and adds a series of **algorithmic and engineering improvements** that collectively deliver a clean wall-clock speedup while actually *reducing* GPU memory footprint. Every improvement is behind a config flag (some default-on, some opt-in) and every wall-clock claim is backed by a reproducible benchmark JSON committed to [`docs/`](docs/).
 
+All measurements in this README and under [`docs/`](docs/) were taken on a single **NVIDIA DGX Spark** (GB10 Superchip, 128 GB unified LPDDR5X memory). See the [Test Environment](#test-environment) section for hardware details and how the unified-memory architecture affects interpretation of each improvement.
+
 **Both the user-facing API and the YAML config format are backward compatible.** Existing MegaTrain configs and scripts work unchanged.
 
 ## Improvements
@@ -46,7 +48,31 @@ Also included:
 
 ## Measured Results
 
-Qwen2.5-7B, batch=2, seq=512, single GPU, RAM-safe benchmark (no optimizer step):
+### Test Environment
+
+All measurements in this README and under [`docs/`](docs/) were taken on a single **NVIDIA DGX Spark** workstation:
+
+| Component | Spec |
+|---|---|
+| Platform | NVIDIA DGX Spark |
+| Superchip | NVIDIA **GB10** (Grace CPU + Blackwell GPU on one package) |
+| CPU | 20 ARM cores (10x Cortex-X925 + 10x Cortex-A725) |
+| GPU | Blackwell, 48 SMs, compute capability 12.1 (sm_121) |
+| Memory | 128 GB LPDDR5X **unified** (shared between CPU and GPU) |
+| Driver / CUDA | 580.126.09 / CUDA 13.0 |
+| Software | PyTorch 2.11.0 + cu130, Flash Attention 2, HuggingFace Transformers 5.x |
+
+DGX Spark is architecturally different from a typical discrete-GPU server: **CPU and GPU share the same physical memory pool**, so what the existing MegaTrain code calls "CPU→GPU transfer" is really a coherent memory copy, not a PCIe transaction. This affects how each improvement behaves:
+
+- **Skip recompute** and **zero-copy unflatten** are pure GPU-compute / GPU-memory wins. Results should translate to any GPU system with similar relative compute-to-memcpy ratios.
+- **FP8 weight transfer quantization** shows up as wall-clock negative here because there is no PCIe to save. On a discrete GPU with slow PCIe (e.g. PCIe 3.0), the trade-off flips.
+- **Triple buffering** and the **grad worker pool** fall into the "insurance" bucket on DGX Spark because compute dominates over what little transfer cost exists. On a PCIe-bound discrete system they could become load-bearing.
+
+The numbers below are therefore best read as a lower bound on discrete-GPU systems for the compute-focused improvements, and as a specific data point for DGX Spark overall.
+
+### Headline numbers
+
+Qwen2.5-7B, batch=2, seq=512, single GPU, RAM-safe benchmark (`--no-optimizer`):
 
 | Metric | Upstream MegaTrain | MegaTrain-Plus | Δ |
 |---|---|---|---|
@@ -60,7 +86,8 @@ Qwen2.5-7B, batch=2, seq=512, single GPU, RAM-safe benchmark (no optimizer step)
 
 Both **faster** AND **less GPU memory**. The reason memory goes down: the zero-copy unflatten optimization lets the layer templates alias the flat GPU buffer instead of holding their own copies, so `(1 + N_buffers) × layer_size` becomes `N_buffers × layer_size` per structure group.
 
-Reproduce:
+### Reproduce
+
 ```bash
 # Upstream-equivalent baseline
 python scripts/benchmark.py --model Qwen/Qwen2.5-7B-Instruct \
