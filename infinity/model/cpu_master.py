@@ -481,9 +481,13 @@ class CPUMasterModel:
         self._model_config = hf_model.config
         logger.info(f"Creating GPU layer templates (per structure group, {self.num_buffers}-buffered)...")
         self.gpu_layer_templates = {}  # {group_id: [template_0, ..., template_N-1]}
+        # Phase 4b: cache list(template.parameters()) per template so hot paths
+        # don't re-traverse the module tree on every call.
+        self.gpu_template_params = {}  # {group_id: [[p for p in template_0.parameters()], ...]}
         for gid, group in self.layer_groups.items():
             representative_idx = group['indices'][0]
             templates = []
+            templates_params = []
             for _ in range(self.num_buffers):
                 template = copy.deepcopy(self.cpu_layers[representative_idx])
                 # Preserve attention implementation before moving to GPU
@@ -493,7 +497,9 @@ class CPUMasterModel:
                 for p in template.parameters():
                     p.requires_grad_(False)
                 templates.append(template)
+                templates_params.append(list(template.parameters()))
             self.gpu_layer_templates[gid] = templates
+            self.gpu_template_params[gid] = templates_params
 
         # GPU modules (created once, reused)
         logger.info("Creating GPU modules (once)...")
@@ -666,11 +672,13 @@ class CPUMasterModel:
                 for _ in range(self.num_buffers)
             ]
 
-        # Rebuild GPU layer templates
+        # Rebuild GPU layer templates and re-cache param lists
         self.gpu_layer_templates = {}
+        self.gpu_template_params = {}
         for gid, group in self.layer_groups.items():
             representative_idx = group['indices'][0]
             templates = []
+            templates_params = []
             for _ in range(self.num_buffers):
                 template = copy.deepcopy(self.cpu_layers[representative_idx])
                 _preserve_attn_implementation(template, self._model_config)
@@ -678,7 +686,9 @@ class CPUMasterModel:
                 for p in template.parameters():
                     p.requires_grad_(False)
                 templates.append(template)
+                templates_params.append(list(template.parameters()))
             self.gpu_layer_templates[gid] = templates
+            self.gpu_template_params[gid] = templates_params
 
         # Rebuild GPU modules from CPU state
         self.emb_gpu = copy.deepcopy(self.embedding).to(self.device)
@@ -706,6 +716,11 @@ class CPUMasterModel:
         """Get the GPU layer template for a given layer index and buffer slot."""
         group_id = self.layer_to_group[layer_idx]
         return self.gpu_layer_templates[group_id][buffer_idx]
+
+    def _get_gpu_layer_params(self, layer_idx, buffer_idx):
+        """Get the cached parameter list for a given template (avoids re-traversing the module tree)."""
+        group_id = self.layer_to_group[layer_idx]
+        return self.gpu_template_params[group_id][buffer_idx]
 
     def _grad_worker(self):
         """CPU worker thread: wait for D2H completion, accumulate gradients, return slab to pool."""
@@ -832,15 +847,22 @@ class CPUMasterModel:
         # Wait for template to be free (grad D2H from previous use must complete)
         self.compute_stream.wait_event(self.template_free_events[buffer_idx])
 
+        gpu_params = self._get_gpu_layer_params(layer_idx, buffer_idx)  # Phase 4b: cached
+
         if self._weight_quantizer is None:
+            numels = self.layer_param_numel[layer_idx]
+            shapes = self.layer_param_shapes[layer_idx]
+            # Phase 4: batched memcpy via torch._foreach_copy_ (one launch
+            # instead of 24 separate copy_ calls).
+            src_views = []
             offset = 0
-            for p in gpu_layer.parameters():
-                numel = p.numel()
-                p.data.copy_(flat[offset:offset + numel].view(p.shape))
-                offset += numel
+            for n, shape in zip(numels, shapes):
+                src_views.append(flat[offset:offset + n].view(shape))
+                offset += n
+            dst_tensors = [p.data for p in gpu_params]
+            torch._foreach_copy_(dst_tensors, src_views)
         else:
             numels = self.layer_param_numel[layer_idx]
-            gpu_params = list(gpu_layer.parameters())
             self._weight_quantizer.dequantize_layer_gpu(
                 gpu_params=gpu_params,
                 numels=numels,
@@ -873,11 +895,11 @@ class CPUMasterModel:
 
         self.grad_stream.wait_event(self.backward_done_events[buffer_idx])
 
-        gpu_layer = self._get_gpu_layer(layer_idx, buffer_idx)
+        gpu_params = self._get_gpu_layer_params(layer_idx, buffer_idx)  # Phase 4b: cached
 
         with torch.cuda.stream(self.grad_stream):
             offset = 0
-            for p_gpu in gpu_layer.parameters():
+            for p_gpu in gpu_params:
                 if p_gpu.grad is not None:
                     numel = p_gpu.grad.numel()
                     slab_flat[offset:offset + numel].copy_(p_gpu.grad.flatten(), non_blocking=True)
@@ -1386,9 +1408,10 @@ class CPUMasterModel:
                     self.buffer_busy_events[buffer_idx].record(self.compute_stream)
 
                     gpu_layer = self._get_gpu_layer(i, buffer_idx)
+                    gpu_params = self._get_gpu_layer_params(i, buffer_idx)  # Phase 4b: cached
 
                     # Temporarily enable gradients on GPU template parameters for autograd.grad
-                    for p in gpu_layer.parameters():
+                    for p in gpu_params:
                         p.requires_grad_(True)
 
                     out = gpu_layer(layer_input, **layer_kwargs)
@@ -1396,7 +1419,7 @@ class CPUMasterModel:
 
                     grads = torch.autograd.grad(
                         outputs=layer_output,
-                        inputs=(layer_input, *gpu_layer.parameters()),
+                        inputs=(layer_input, *gpu_params),
                         grad_outputs=grad_hidden,
                         retain_graph=False,
                         create_graph=False,
@@ -1405,11 +1428,11 @@ class CPUMasterModel:
                     grad_hidden = grads[0].detach()
                     param_grads = grads[1:]
 
-                    for p, g in zip(gpu_layer.parameters(), param_grads):
+                    for p, g in zip(gpu_params, param_grads):
                         p.grad = g
 
                     # Disable gradients again to keep templates clean
-                    for p in gpu_layer.parameters():
+                    for p in gpu_params:
                         p.requires_grad_(False)
 
                     self.backward_done_events[buffer_idx].record(self.compute_stream)
@@ -1632,8 +1655,9 @@ class CPUMasterModel:
                     self.buffer_busy_events[buffer_idx].record(self.compute_stream)
 
                     gpu_layer = self._get_gpu_layer(i, buffer_idx)
+                    gpu_params = self._get_gpu_layer_params(i, buffer_idx)  # Phase 4b: cached
 
-                    for p in gpu_layer.parameters():
+                    for p in gpu_params:
                         p.requires_grad_(True)
 
                     out = gpu_layer(layer_input, **layer_kwargs)
@@ -1641,7 +1665,7 @@ class CPUMasterModel:
 
                     grads = torch.autograd.grad(
                         outputs=layer_output,
-                        inputs=(layer_input, *gpu_layer.parameters()),
+                        inputs=(layer_input, *gpu_params),
                         grad_outputs=grad_hidden,
                         retain_graph=False,
                         create_graph=False,
@@ -1650,10 +1674,10 @@ class CPUMasterModel:
                     grad_hidden = grads[0].detach()
                     param_grads = grads[1:]
 
-                    for p, g in zip(gpu_layer.parameters(), param_grads):
+                    for p, g in zip(gpu_params, param_grads):
                         p.grad = g
 
-                    for p in gpu_layer.parameters():
+                    for p in gpu_params:
                         p.requires_grad_(False)
 
                     self.backward_done_events[buffer_idx].record(self.compute_stream)
