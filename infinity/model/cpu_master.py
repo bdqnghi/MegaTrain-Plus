@@ -422,16 +422,17 @@ class CPUMasterModel:
 
         self.embed_total_numel = sum(p.numel() for p in self.embedding.parameters())
 
-        # === Double-buffered CPU flat buffers (pinned, sized for max layer) ===
+        # === Phase 1B: N-buffered CPU flat buffers (pinned, sized for max layer) ===
+        self.num_buffers = config.num_buffers
         self.cpu_flat_buffers = [
-            torch.empty(self.max_layer_numel, dtype=config.dtype).pin_memory(),
             torch.empty(self.max_layer_numel, dtype=config.dtype).pin_memory()
+            for _ in range(self.num_buffers)
         ]
 
-        # === Double-buffered GPU flat params ===
+        # === N-buffered GPU flat params ===
         self.gpu_flat_buffers = [
-            torch.empty(self.max_layer_numel, dtype=config.dtype, device=self.device),
             torch.empty(self.max_layer_numel, dtype=config.dtype, device=self.device)
+            for _ in range(self.num_buffers)
         ]
 
         # === GPU layer templates (per structure group, double buffered) ===
@@ -439,12 +440,12 @@ class CPUMasterModel:
         # HuggingFace may reset attention implementation during .to(device).
         # We save the config's _attn_implementation and restore it after deepcopy+move.
         self._model_config = hf_model.config
-        logger.info("Creating GPU layer templates (per structure group, double buffered)...")
-        self.gpu_layer_templates = {}  # {group_id: [template_0, template_1]}
+        logger.info(f"Creating GPU layer templates (per structure group, {self.num_buffers}-buffered)...")
+        self.gpu_layer_templates = {}  # {group_id: [template_0, ..., template_N-1]}
         for gid, group in self.layer_groups.items():
             representative_idx = group['indices'][0]
             templates = []
-            for _ in range(2):
+            for _ in range(self.num_buffers):
                 template = copy.deepcopy(self.cpu_layers[representative_idx])
                 # Preserve attention implementation before moving to GPU
                 _preserve_attn_implementation(template, self._model_config)
@@ -473,25 +474,25 @@ class CPUMasterModel:
         self.weight_stream = torch.cuda.Stream(device=self.device)
         self.grad_stream = torch.cuda.Stream(device=self.device)
 
-        # === Synchronization events ===
+        # === Synchronization events (sized to num_buffers) ===
         self.weight_ready_events = [
-            torch.cuda.Event(enable_timing=False) for _ in range(2)
+            torch.cuda.Event(enable_timing=False) for _ in range(self.num_buffers)
         ]
         self.h2d_done_events = [
-            torch.cuda.Event(enable_timing=False) for _ in range(2)
+            torch.cuda.Event(enable_timing=False) for _ in range(self.num_buffers)
         ]
         self.backward_done_events = [
-            torch.cuda.Event(enable_timing=False) for _ in range(2)
+            torch.cuda.Event(enable_timing=False) for _ in range(self.num_buffers)
         ]
         self.buffer_busy_events = [
-            torch.cuda.Event(enable_timing=False) for _ in range(2)
+            torch.cuda.Event(enable_timing=False) for _ in range(self.num_buffers)
         ]
         self.buffer_free_events = [
-            torch.cuda.Event(enable_timing=False) for _ in range(2)
+            torch.cuda.Event(enable_timing=False) for _ in range(self.num_buffers)
         ]
         # Template protection: template can't be reused until grad D2H finishes
         self.template_free_events = [
-            torch.cuda.Event(enable_timing=False) for _ in range(2)
+            torch.cuda.Event(enable_timing=False) for _ in range(self.num_buffers)
         ]
         self.param_sync_event = torch.cuda.Event(enable_timing=False)
         self.loss_backward_done = torch.cuda.Event(enable_timing=False)
@@ -532,7 +533,7 @@ class CPUMasterModel:
         # Initialize events
         logger.info("Initializing buffer state events...")
         current_stream = torch.cuda.current_stream(self.device)
-        for i in range(2):
+        for i in range(self.num_buffers):
             self.buffer_free_events[i].record(current_stream)
             self.template_free_events[i].record(current_stream)
             self.h2d_done_events[i].record(current_stream)
@@ -601,10 +602,10 @@ class CPUMasterModel:
         if not hasattr(self, '_gpu_released') or not self._gpu_released:
             return  # Already have GPU buffers
 
-        # Rebuild double-buffered GPU flat params
+        # Rebuild N-buffered GPU flat params
         self.gpu_flat_buffers = [
-            torch.empty(self.max_layer_numel, dtype=self.config.dtype, device=self.device),
             torch.empty(self.max_layer_numel, dtype=self.config.dtype, device=self.device)
+            for _ in range(self.num_buffers)
         ]
 
         # Rebuild GPU layer templates
@@ -612,7 +613,7 @@ class CPUMasterModel:
         for gid, group in self.layer_groups.items():
             representative_idx = group['indices'][0]
             templates = []
-            for _ in range(2):
+            for _ in range(self.num_buffers):
                 template = copy.deepcopy(self.cpu_layers[representative_idx])
                 _preserve_attn_implementation(template, self._model_config)
                 template = template.to(self.device)
@@ -633,7 +634,7 @@ class CPUMasterModel:
 
         # Re-initialize synchronization events
         current_stream = torch.cuda.current_stream(self.device)
-        for i in range(2):
+        for i in range(self.num_buffers):
             self.buffer_free_events[i].record(current_stream)
             self.template_free_events[i].record(current_stream)
             self.h2d_done_events[i].record(current_stream)
@@ -983,8 +984,8 @@ class CPUMasterModel:
             self._unflatten_to_layer(0, 0)
 
             for i in range(len(self.cpu_layers)):
-                buffer_idx = i % 2
-                next_buffer_idx = (i + 1) % 2
+                buffer_idx = i % self.num_buffers
+                next_buffer_idx = (i + 1) % self.num_buffers
 
                 if i % self.config.checkpoint_interval == 0:
                     checkpoints[i] = hidden.detach()
@@ -1095,8 +1096,8 @@ class CPUMasterModel:
             self._unflatten_to_layer(0, 0)
 
             for i in range(len(self.cpu_layers)):
-                buffer_idx = i % 2
-                next_buffer_idx = (i + 1) % 2
+                buffer_idx = i % self.num_buffers
+                next_buffer_idx = (i + 1) % self.num_buffers
 
                 if i % self.config.checkpoint_interval == 0:
                     checkpoints[i] = hidden.detach()
@@ -1225,12 +1226,12 @@ class CPUMasterModel:
             with torch.no_grad():
                 if self.config.backward_prefetch:
                     # Phase 1A: prefetch first layer of block
-                    first_buf = block_start % 2
+                    first_buf = block_start % self.num_buffers
                     self._load_layer_to_buffer_async(block_start, first_buf)
 
                 for j in range(block_start, block_end):
-                    buffer_idx = j % 2
-                    next_buffer_idx = (j + 1) % 2
+                    buffer_idx = j % self.num_buffers
+                    next_buffer_idx = (j + 1) % self.num_buffers
 
                     if self.config.backward_prefetch:
                         # Prefetch next recompute layer while computing current
@@ -1256,12 +1257,12 @@ class CPUMasterModel:
             # Backward through block
             if self.config.backward_prefetch:
                 # Phase 1A: prefetch last layer of block (first to be processed in reverse)
-                first_bwd_buf = (block_end - 1) % 2
+                first_bwd_buf = (block_end - 1) % self.num_buffers
                 self._load_layer_to_buffer_async(block_end - 1, first_bwd_buf)
 
             for i in range(block_end - 1, block_start - 1, -1):
-                buffer_idx = i % 2
-                next_buffer_idx = (i - 1) % 2
+                buffer_idx = i % self.num_buffers
+                next_buffer_idx = (i - 1) % self.num_buffers
 
                 if i == block_start:
                     layer_input = current_checkpoint.detach().requires_grad_(True)
@@ -1471,12 +1472,12 @@ class CPUMasterModel:
             with torch.no_grad():
                 if self.config.backward_prefetch:
                     # Phase 1A: prefetch first layer of block
-                    first_buf = block_start % 2
+                    first_buf = block_start % self.num_buffers
                     self._load_layer_to_buffer_async(block_start, first_buf)
 
                 for j in range(block_start, block_end):
-                    buffer_idx = j % 2
-                    next_buffer_idx = (j + 1) % 2
+                    buffer_idx = j % self.num_buffers
+                    next_buffer_idx = (j + 1) % self.num_buffers
 
                     if self.config.backward_prefetch:
                         if j + 1 < block_end:
@@ -1499,12 +1500,12 @@ class CPUMasterModel:
 
             if self.config.backward_prefetch:
                 # Phase 1A: prefetch last layer of block (first to be processed in reverse)
-                first_bwd_buf = (block_end - 1) % 2
+                first_bwd_buf = (block_end - 1) % self.num_buffers
                 self._load_layer_to_buffer_async(block_end - 1, first_bwd_buf)
 
             for i in range(block_end - 1, block_start - 1, -1):
-                buffer_idx = i % 2
-                next_buffer_idx = (i - 1) % 2
+                buffer_idx = i % self.num_buffers
+                next_buffer_idx = (i - 1) % self.num_buffers
 
                 if i == block_start:
                     layer_input = current_checkpoint.detach().requires_grad_(True)
