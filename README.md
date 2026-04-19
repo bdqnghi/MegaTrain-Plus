@@ -8,7 +8,7 @@
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org/)
 
-[Improvements](#improvements) | [Quick Start](#quick-start) | [Results](#measured-results) | [Config Reference](#config-reference) | [Docs](#documentation)
+[Improvements](#improvements) | [Quick Start](#quick-start) | [Results](#measured-results) | [Config Reference](#config-reference)
 
 </div>
 
@@ -339,23 +339,6 @@ dataset:
 ```
 
 Supports alpaca format, sharegpt format, local JSON/JSONL, and HuggingFace Hub datasets.
-
-## Documentation
-
-Start at [`docs/README.md`](docs/README.md) for the full index. At a glance:
-
-- Entry points: [`status.md`](docs/status.md), [`suite_summary.md`](docs/suite_summary.md), [`progress_summary.md`](docs/progress_summary.md)
-- Deep-dives on each improvement, under [`docs/phases/`](docs/phases/):
-  - [`phase1.md`](docs/phases/phase1.md): backward prefetching + triple buffering
-  - [`phase1d.md`](docs/phases/phase1d.md): DataLoader fork artifact investigation
-  - [`phase2.md`](docs/phases/phase2.md): FP8 weight transfer (why it isn't a win yet)
-  - [`phase3.md`](docs/phases/phase3.md): **skip recompute** (the biggest win)
-  - [`phase5.md`](docs/phases/phase5.md): **zero-copy unflatten** (second biggest)
-- Historical context, under [`docs/plan/`](docs/plan/):
-  - [`plan.md`](docs/plan/plan.md): original plan with retrospective
-  - [`codex-critique.md`](docs/plan/codex-critique.md): Codex critique of the plan
-  - [`gemini-analysis.md`](docs/plan/gemini-analysis.md): Gemini technical analysis
-- Raw benchmark outputs under [`docs/benchmarks/`](docs/benchmarks/): JSONs grouped by phase, plus a `suite/` subdir with 24 per-model runs from the 12-model validation
 
 ## Profiling Tools
 
