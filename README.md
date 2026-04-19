@@ -24,6 +24,115 @@ Every improvement is behind a config flag (some default-on, some opt-in) and eve
 
 **Both the user-facing API and the YAML config format are backward compatible.** Existing MegaTrain configs and scripts work unchanged.
 
+## How It Works on DGX Spark
+
+MegaTrain's value on DGX Spark is a **memory-allocator trick**, not a bandwidth trick. The 128 GB unified pool is organized so the CUDA allocator holds only a transient working set, while the bulk of persistent training state sits in the lean CPU-side allocator. Three diagrams:
+
+### The capacity trick — where the bytes sit
+
+```
+DGX Spark: 128 GB unified LPDDR5X  (one physical pool)
+══════════════════════════════════════════════════════════
+
+NAIVE PyTorch (7B)                  MegaTrain (7B)
+─────────────────                   ──────────────
+
+┌─── GPU allocator ────┐           ┌── GPU allocator ──┐
+│                      │           │  [1 layer, ~7 GB] │  ← transient
+│  BF16 weight   14 GB │           │   (streams in,    │
+│  BF16 grad     14 GB │           │    evicts out)    │
+│  FP32 master   28 GB │           └──────▲──────▼─────┘
+│  Adam m        28 GB │                  │      │
+│  Adam v        28 GB │           weights│      │grads
+│  ─────────────────   │                  │      ▼
+│    112 GB wanted     │           ┌── CPU allocator ──┐
+│    × ~1.4 allocator  │           │  BF16 weight 14GB │  ← persistent
+│    fragmentation     │           │  BF16 grad   14GB │
+│    = ~157 GB needed  │           │  FP32 master 28GB │
+│                      │           │  Adam m      28GB │
+│  ✗ OOM on 128 GB     │           │  Adam v      28GB │
+└──────────────────────┘           │  ─────────────── │
+                                   │   ~112 GB total   │
+Ceiling: ~2–3B params              └───────────────────┘
+
+                                   Ceiling: ~8B with full
+                                   Adam (or ~32B in the
+                                   --no-optimizer benchmark
+                                   mode this suite uses)
+```
+
+Same physical memory, different accounting. Moving the 12 B/param of optimizer state (FP32 master + Adam m + Adam v) off the CUDA allocator is what lifts the ceiling — the CUDA allocator is greedy and fragments, while the CPU allocator packs lean.
+
+### The streaming mechanism — how a forward pass runs
+
+```
+Layer-by-layer streaming with ping-pong buffers
+════════════════════════════════════════════════
+
+CPU side                              GPU side (transient)
+────────                              ────────────────────
+
+┌─ layer 0 weights ─┐    DMA          ┌── buffer A ──┐
+│ BF16 flat tensor  │ ────────────▶   │  layer i     │
+└───────────────────┘   (weight       └──────┬───────┘
+┌─ layer 1 weights ─┐    stream)             │
+│ BF16 flat tensor  │                        │ compute
+└───────────────────┘                        │
+┌─ layer 2 weights ─┐                        ▼
+│ BF16 flat tensor  │                 ┌── buffer B ──┐
+└───────────────────┘                 │  layer i+1   │  ← prefetched
+        ⋮                             │  (ready when │    while A
+┌─ layer N weights ─┐                 │   A finishes)│    computed
+│ BF16 flat tensor  │                 └──────────────┘
+└───────────────────┘
+
+Three concurrent CUDA streams orchestrate this:
+
+  weight_stream   ──▶▶▶──  H2D DMA  (next layer's weights)
+  compute_stream  ──▶▶▶──  matmul/attention on current layer
+  grad_stream     ──▶▶▶──  D2H DMA  (backward: grads → CPU slab)
+
+Timeline (forward):
+  time →
+  weight:  [load L0][load L1][load L2][load L3] ...
+  compute:         [run  L0 ][run  L1 ][run  L2 ] ...
+                    └── buffer A ┘└── buffer B ┘└── A again ┘
+                       (ping)       (pong)        (ping)
+```
+
+While compute works on buffer A, the DMA engine silently fills buffer B with the next layer. GPU compute never stalls waiting for weights.
+
+### One-screen summary
+
+```
+        ┌──────────────────────────────────────────────┐
+        │    DGX SPARK (128 GB unified, 1 bucket)      │
+        │                                              │
+        │   CPU allocator view      GPU allocator view │
+        │   ───────────────────     ─────────────────  │
+        │                                              │
+        │   persistent state        transient work     │
+        │                                              │
+        │   • FP32 master           • 1 layer's BF16   │
+        │   • Adam m (FP32)           weights (flat)   │
+        │   • Adam v (FP32)         • activations      │
+        │   • BF16 weight copies    • autograd (1 L)   │
+        │   • BF16 gradient slabs   • 2–3 flat buffers │
+        │                             (ping-pong)      │
+        │   ~12–16 B/param          ~1 B/param peak    │
+        │        │   ▲                  ▲    │         │
+        │        │   │  ── grads D2H ── │    │         │
+        │        │   │                  │    │         │
+        │        ▼   │  ── weights H2D ─▶    ▼         │
+        │       ┌────┴─────────────────────┐           │
+        │       │ NVLink-C2C (~600 GB/s,   │           │
+        │       │  coherent, same-package) │           │
+        │       └──────────────────────────┘           │
+        └──────────────────────────────────────────────┘
+```
+
+On a discrete H100 + host server, these two views map to **two different physical tiers**: a 1 TB+ DDR host pool and 80 GB HBM connected by ~50 GB/s PCIe. That is the hardware context that makes upstream MegaTrain's "100B on a single GPU" demonstration possible — the large cheap tier holds what the small expensive tier can't. On DGX Spark both views land in the same 128 GB LPDDR5X, so the method still works as an allocator-organization tool, but the size ceiling is set by total package memory rather than by the size of a separate host tier.
+
 ## Improvements
 
 | Area | Change | Effect | Default |
