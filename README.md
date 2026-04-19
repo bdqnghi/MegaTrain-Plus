@@ -70,7 +70,7 @@ DGX Spark is architecturally different from a typical discrete-GPU server: **CPU
 
 The numbers below are therefore best read as a lower bound on discrete-GPU systems for the compute-focused improvements, and as a specific data point for DGX Spark overall.
 
-### Headline numbers
+### Headline: Qwen2.5-7B
 
 Qwen2.5-7B, batch=2, seq=512, single GPU, RAM-safe benchmark (`--no-optimizer`):
 
@@ -86,8 +86,32 @@ Qwen2.5-7B, batch=2, seq=512, single GPU, RAM-safe benchmark (`--no-optimizer`):
 
 Both **faster** AND **less GPU memory**. The reason memory goes down: the zero-copy unflatten optimization lets the layer templates alias the flat GPU buffer instead of holding their own copies, so `(1 + N_buffers) × layer_size` becomes `N_buffers × layer_size` per structure group.
 
+### Multi-model suite
+
+The same A/B run across 10 public models covering three architectures (Qwen2.5, Qwen3, Llama via SmolLM2) from 360M to 8.2B parameters. Full table in [`docs/suite_summary.md`](docs/suite_summary.md):
+
+| Model | Params | Δ step time | Δ throughput | Δ backward | Loss match |
+|---|---|---|---|---|---|
+| SmolLM2-360M-Instruct | 0.36B | -22.8% | +29.5% | -36.8% | yes |
+| Qwen2.5-0.5B-Instruct | 0.49B | -26.0% | +35.0% | -38.3% | yes |
+| Qwen3-0.6B | 0.60B | -23.9% | +31.4% | -35.8% | yes |
+| Qwen2.5-1.5B-Instruct | 1.54B | -25.2% | +33.6% | -36.7% | yes |
+| SmolLM2-1.7B-Instruct | 1.71B | -28.9% | +40.6% | -38.5% | yes |
+| Qwen3-1.7B | 1.72B | -26.9% | +36.7% | -39.7% | yes |
+| Qwen2.5-3B-Instruct | 3.09B | -27.6% | +38.0% | -31.5% | yes |
+| Qwen3-4B | 4.02B | -28.1% | +39.1% | -36.4% | yes |
+| Qwen2.5-7B-Instruct | 7.62B | -29.6% | +42.0% | -36.3% | yes |
+| Qwen3-8B | 8.19B | -29.2% | +41.2% | -35.9% | yes |
+
+**Across all 10 models:**
+- Step time: mean **-26.8%**, range -29.6% to -22.8%
+- Throughput: mean **+36.7%**, range +29.5% to +42.0%
+- Backward: mean **-36.6%**, range -39.7% to -31.5%
+- **10/10 pass loss bit-exact match.**
+
 ### Reproduce
 
+Single-model run:
 ```bash
 # Upstream-equivalent baseline
 python scripts/benchmark.py --model Qwen/Qwen2.5-7B-Instruct \
@@ -98,6 +122,16 @@ python scripts/benchmark.py --model Qwen/Qwen2.5-7B-Instruct \
 python scripts/benchmark.py --model Qwen/Qwen2.5-7B-Instruct \
     --batch-size 2 --seq-len 512 --steps 5 --no-optimizer \
     --store-all-activations
+```
+
+Full multi-model suite:
+```bash
+python scripts/benchmark_suite.py \
+    --models "Qwen/Qwen2.5-0.5B-Instruct,Qwen/Qwen2.5-1.5B-Instruct,Qwen/Qwen2.5-3B-Instruct,Qwen/Qwen2.5-7B-Instruct,Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B,Qwen/Qwen3-8B,HuggingFaceTB/SmolLM2-360M-Instruct,HuggingFaceTB/SmolLM2-1.7B-Instruct" \
+    --batch-size 2 --seq-len 512 --steps 5
+
+# Regenerate the summary table from existing per-model JSONs
+python scripts/merge_suite_results.py
 ```
 
 Additional scaling data across batches and sequence lengths: [`docs/phase3_results.md`](docs/phase3_results.md), [`docs/phase5_results.md`](docs/phase5_results.md).
@@ -155,7 +189,11 @@ Unknown keys are ignored with defaults. Older MegaTrain configs work unchanged.
 
 MegaTrain-Plus inherits universal HuggingFace support from upstream MegaTrain. Any decoder-only LLM or vision-language model works through `AutoModelForCausalLM` / `AutoModelForImageTextToText` with automatic structure discovery.
 
-Tested families: Qwen2/2.5/3/3.5, Qwen3-Next, Llama 2/3/4, Mistral, Mixtral, DeepSeek, Phi-3/4, Gemma 2/3, GLM-4/4.5, InternLM, Yi, Baichuan, GPT-OSS, plus VLMs (Qwen2-VL, Qwen2.5-VL, Qwen3-VL, LLaVA, InternVL, MiniCPM-V, Gemma 3 VL). See [`examples/sft/configs/`](examples/sft/configs/) for ready-made configs.
+Families that upstream MegaTrain supports: Qwen2/2.5/3/3.5, Qwen3-Next, Llama 2/3/4, Mistral, Mixtral, DeepSeek, Phi-3/4, Gemma 2/3, GLM-4/4.5, InternLM, Yi, Baichuan, GPT-OSS, plus VLMs (Qwen2-VL, Qwen2.5-VL, Qwen3-VL, LLaVA, InternVL, MiniCPM-V, Gemma 3 VL). See [`examples/sft/configs/`](examples/sft/configs/) for ready-made configs.
+
+The MegaTrain-Plus improvements are **validated** on 10 models across three architectures (Qwen2.5, Qwen3, Llama via SmolLM2) from 0.36B to 8.2B. See [`docs/suite_summary.md`](docs/suite_summary.md) for the full table. Every tested model shows a consistent ~25-30% step-time reduction, ~30-40% throughput gain, and bit-exact identical loss. The wins are algorithmic and do not depend on the specific model family.
+
+> **Note:** Phi-3 currently fails on the benchmark because transformers 5.x does not support Flash Attention 2 for that architecture yet. This is an upstream transformers limitation, not a MegaTrain-Plus issue. Phi-3 should work once FA2 support lands upstream, or today with `attn_implementation: "sdpa"`.
 
 ## RL Training (GRPO)
 
