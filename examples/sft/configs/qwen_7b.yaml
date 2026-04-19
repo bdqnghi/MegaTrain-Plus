@@ -8,14 +8,13 @@ model:
   trust_remote_code: true
 
 dataset:
-  path: "dataset/Math/train"
+  name: "metamath"
+  dataset_dir: "data"
   max_seq_len: 1024
   num_workers: 4
-  query_field: "query"
-  response_field: "response"
 
 training:
-  batch_size: 148
+  batch_size: 16
   gradient_accumulation_steps: 1
   num_steps: 1000
   learning_rate: 2.0e-5
