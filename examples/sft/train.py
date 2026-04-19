@@ -143,11 +143,10 @@ def main():
     logger.info(f"Loading model with attn_implementation='{config.attn_implementation}'...")
     hf_model = load_class.from_pretrained(
         config.model_name,
-        torch_dtype=config.dtype,
-        device_map="cpu",
+        dtype=config.dtype,
         trust_remote_code=config.trust_remote_code,
         attn_implementation=config.attn_implementation,
-    )
+    ).to("cpu")
 
     # Verify attention implementation was applied
     attn_impl = getattr(hf_model.config, '_attn_implementation', 'unknown')

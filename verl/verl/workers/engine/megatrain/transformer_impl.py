@@ -121,11 +121,10 @@ class MegaTrainEngine(BaseEngine):
         logger.info(f"Loading model from {model_path} with attn={attn_impl}")
         hf_model = load_class.from_pretrained(
             model_path,
-            torch_dtype=dtype,
-            device_map="cpu",
+            dtype=dtype,
             trust_remote_code=trust_remote_code,
             attn_implementation=attn_impl,
-        )
+        ).to("cpu")
 
         # Build HF param name mapping BEFORE creating CPUMasterModel
         # because CPUMasterModel decomposes the model into components

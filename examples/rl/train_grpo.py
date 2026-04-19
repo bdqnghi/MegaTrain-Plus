@@ -323,11 +323,10 @@ def main():
 
     hf_model = load_class.from_pretrained(
         model_cfg["name"],
-        torch_dtype=dtype,
-        device_map="cpu",
+        dtype=dtype,
         trust_remote_code=True,
         attn_implementation=model_cfg.get("attn_implementation", "flash_attention_2"),
-    )
+    ).to("cpu")
 
     model = CPUMasterModel(hf_model, megatrain_config)
     del hf_model
