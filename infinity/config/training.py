@@ -75,6 +75,7 @@ class CPUMasterConfig:
     # Memory
     checkpoint_interval: int = 4
     num_grad_slabs: int = 12
+    backward_prefetch: bool = True  # Phase 1A: prefetch next layer in backward recompute+grad loops
 
     # Logging
     log_interval: int = 1

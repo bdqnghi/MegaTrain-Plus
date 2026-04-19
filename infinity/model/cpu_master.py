@@ -1223,9 +1223,23 @@ class CPUMasterModel:
             hidden_recompute = current_checkpoint
 
             with torch.no_grad():
+                if self.config.backward_prefetch:
+                    # Phase 1A: prefetch first layer of block
+                    first_buf = block_start % 2
+                    self._load_layer_to_buffer_async(block_start, first_buf)
+
                 for j in range(block_start, block_end):
                     buffer_idx = j % 2
-                    self._load_layer_to_buffer_async(j, buffer_idx)
+                    next_buffer_idx = (j + 1) % 2
+
+                    if self.config.backward_prefetch:
+                        # Prefetch next recompute layer while computing current
+                        if j + 1 < block_end:
+                            self._load_layer_to_buffer_async(j + 1, next_buffer_idx)
+                    else:
+                        # Original serial load-then-wait behavior
+                        self._load_layer_to_buffer_async(j, buffer_idx)
+
                     self.compute_stream.wait_event(self.weight_ready_events[buffer_idx])
 
                     with torch.cuda.stream(self.compute_stream):
@@ -1240,15 +1254,28 @@ class CPUMasterModel:
                     del out
 
             # Backward through block
+            if self.config.backward_prefetch:
+                # Phase 1A: prefetch last layer of block (first to be processed in reverse)
+                first_bwd_buf = (block_end - 1) % 2
+                self._load_layer_to_buffer_async(block_end - 1, first_bwd_buf)
+
             for i in range(block_end - 1, block_start - 1, -1):
                 buffer_idx = i % 2
+                next_buffer_idx = (i - 1) % 2
 
                 if i == block_start:
                     layer_input = current_checkpoint.detach().requires_grad_(True)
                 else:
                     layer_input = recompute_cache[i - 1].requires_grad_(True)
 
-                self._load_layer_to_buffer_async(i, buffer_idx)
+                if self.config.backward_prefetch:
+                    # Prefetch next backward layer (i-1) while computing current (i)
+                    if i - 1 >= block_start:
+                        self._load_layer_to_buffer_async(i - 1, next_buffer_idx)
+                else:
+                    # Original serial load-then-wait behavior
+                    self._load_layer_to_buffer_async(i, buffer_idx)
+
                 self.compute_stream.wait_event(self.weight_ready_events[buffer_idx])
 
                 with torch.cuda.stream(self.compute_stream):
@@ -1442,9 +1469,21 @@ class CPUMasterModel:
             hidden_recompute = current_checkpoint
 
             with torch.no_grad():
+                if self.config.backward_prefetch:
+                    # Phase 1A: prefetch first layer of block
+                    first_buf = block_start % 2
+                    self._load_layer_to_buffer_async(block_start, first_buf)
+
                 for j in range(block_start, block_end):
                     buffer_idx = j % 2
-                    self._load_layer_to_buffer_async(j, buffer_idx)
+                    next_buffer_idx = (j + 1) % 2
+
+                    if self.config.backward_prefetch:
+                        if j + 1 < block_end:
+                            self._load_layer_to_buffer_async(j + 1, next_buffer_idx)
+                    else:
+                        self._load_layer_to_buffer_async(j, buffer_idx)
+
                     self.compute_stream.wait_event(self.weight_ready_events[buffer_idx])
 
                     with torch.cuda.stream(self.compute_stream):
@@ -1458,15 +1497,26 @@ class CPUMasterModel:
                     recompute_cache[j] = hidden_recompute.detach()
                     del out
 
+            if self.config.backward_prefetch:
+                # Phase 1A: prefetch last layer of block (first to be processed in reverse)
+                first_bwd_buf = (block_end - 1) % 2
+                self._load_layer_to_buffer_async(block_end - 1, first_bwd_buf)
+
             for i in range(block_end - 1, block_start - 1, -1):
                 buffer_idx = i % 2
+                next_buffer_idx = (i - 1) % 2
 
                 if i == block_start:
                     layer_input = current_checkpoint.detach().requires_grad_(True)
                 else:
                     layer_input = recompute_cache[i - 1].requires_grad_(True)
 
-                self._load_layer_to_buffer_async(i, buffer_idx)
+                if self.config.backward_prefetch:
+                    if i - 1 >= block_start:
+                        self._load_layer_to_buffer_async(i - 1, next_buffer_idx)
+                else:
+                    self._load_layer_to_buffer_async(i, buffer_idx)
+
                 self.compute_stream.wait_event(self.weight_ready_events[buffer_idx])
 
                 with torch.cuda.stream(self.compute_stream):
