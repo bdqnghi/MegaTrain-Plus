@@ -1,0 +1,93 @@
+{
+  "model": "Qwen/Qwen2.5-32B-Instruct",
+  "num_params_B": 32.76,
+  "num_layers": 64,
+  "batch_size": 2,
+  "seq_len": 512,
+  "checkpoint_interval": 4,
+  "num_buffers": 2,
+  "backward_prefetch": false,
+  "store_all_activations": false,
+  "weight_transfer_dtype": "bfloat16",
+  "skip_optimizer": true,
+  "steps": [
+    {
+      "step": 0,
+      "loss": 1.2007,
+      "tokens": 1024,
+      "step_time_s": 109.227,
+      "fwd_time_s": 30.195,
+      "bwd_time_s": 72.8,
+      "fwd_bwd_total_s": 103.004,
+      "optimizer_time_s": 6.224,
+      "gpu_mem_GB": 11.36,
+      "cpu_mem_GB": 99.86,
+      "grad_norm": null
+    },
+    {
+      "step": 1,
+      "loss": 1.1958,
+      "tokens": 1024,
+      "step_time_s": 115.71,
+      "fwd_time_s": 49.708,
+      "bwd_time_s": 62.944,
+      "fwd_bwd_total_s": 112.658,
+      "optimizer_time_s": 3.052,
+      "gpu_mem_GB": 11.36,
+      "cpu_mem_GB": 100.82,
+      "grad_norm": null
+    },
+    {
+      "step": 2,
+      "loss": 1.2016,
+      "tokens": 1024,
+      "step_time_s": 113.628,
+      "fwd_time_s": 52.454,
+      "bwd_time_s": 57.302,
+      "fwd_bwd_total_s": 109.772,
+      "optimizer_time_s": 3.856,
+      "gpu_mem_GB": 11.36,
+      "cpu_mem_GB": 100.77,
+      "grad_norm": null
+    },
+    {
+      "step": 3,
+      "loss": 0.891,
+      "tokens": 1024,
+      "step_time_s": 113.427,
+      "fwd_time_s": 41.767,
+      "bwd_time_s": 64.219,
+      "fwd_bwd_total_s": 105.991,
+      "optimizer_time_s": 7.436,
+      "gpu_mem_GB": 11.36,
+      "cpu_mem_GB": 98.4,
+      "grad_norm": null
+    },
+    {
+      "step": 4,
+      "loss": 1.0034,
+      "tokens": 1024,
+      "step_time_s": 121.477,
+      "fwd_time_s": 48.847,
+      "bwd_time_s": 68.024,
+      "fwd_bwd_total_s": 116.873,
+      "optimizer_time_s": 4.605,
+      "gpu_mem_GB": 11.36,
+      "cpu_mem_GB": 101.56,
+      "grad_norm": null
+    }
+  ],
+  "summary": {
+    "avg_step_time_s": 116.061,
+    "avg_fwd_time_s": 48.194,
+    "avg_bwd_time_s": 63.122,
+    "avg_optimizer_time_s": 4.737,
+    "bwd_to_fwd_ratio": 1.31,
+    "fwd_pct": 41.5,
+    "bwd_pct": 54.4,
+    "opt_pct": 4.1,
+    "peak_gpu_GB": 11.36,
+    "peak_cpu_GB": 101.56,
+    "tokens_per_sec": 8.8
+  }
+}

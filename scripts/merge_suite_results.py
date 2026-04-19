@@ -109,23 +109,30 @@ def main():
         "",
         "## Observations",
         "",
-        "- The ~25-30% step-time reduction and ~30-40% throughput gain are "
-        "**consistent across families and sizes** (Qwen2.5, Qwen3, SmolLM2 which "
-        "uses the Llama architecture).",
-        "- The backward pass alone speeds up 32-40% - this is dominated by "
-        "`store_all_activations` eliminating the redundant per-block recompute.",
-        "- Forward speedup grows with model size (~-2% at 360M, ~-14% at 7-8B) - "
-        "zero-copy unflatten saves a fixed ~6 ms per layer, which becomes a "
-        "larger fraction of forward time as layers are bigger.",
-        "- Peak GPU memory is roughly flat (small negative delta). The zero-copy "
-        "unflatten saves memory (templates alias the flat buffer), while "
-        "`store_all_activations` adds some back. Net is slightly in the minus on "
-        "most configurations.",
-        "- Every tested model passes loss bit-exact match, confirming these are "
-        "pure algorithmic wins and not numerical approximations.",
-        "- Models that use `flash_attention_2` work out of the box. Phi-3 fails "
-        "because transformers 5.x does not yet support FA2 for that architecture "
-        "(upstream transformers issue, not a MegaTrain-Plus limitation).",
+        "- Step-time reduction and throughput gain are **consistent across "
+        "families and sizes**, but the magnitude varies with scale:",
+        "    - Small models (0.36B - 8B): step time -22% to -30%, throughput +29% to +42%",
+        "    - Mid-size (14B): step time -34%, throughput +52% (the sweet spot where",
+        "      the original BWD/FWD ratio was highest)",
+        "    - Large (32B, 64 layers): step time -12%, throughput +15% (diminishing because",
+        "      the baseline BWD/FWD ratio drops to ~1.3x - forward itself is so heavy",
+        "      at 32B that skip-recompute has less relative backward to eliminate)",
+        "- The backward pass speeds up 15-40%. On smaller models the win is -35% to -42%",
+        "  because recompute is a large chunk of backward time. On 32B it is -15% because",
+        "  the autograd.grad backward dominates per-layer time relative to the eliminated",
+        "  recompute forward.",
+        "- Forward speedup grows with model size (~-2% at 360M, ~-14% at 7-14B) because",
+        "  zero-copy unflatten saves a fixed ~6 ms per layer, which is a larger fraction",
+        "  of forward time when layers are bigger. At 32B it tapers (-4.7%) because the",
+        "  per-layer compute is so heavy that the saved memcpy is small in relative terms.",
+        "- Peak GPU memory goes down on most configurations. Zero-copy unflatten saves",
+        "  memory by having templates alias the flat buffer; `store_all_activations` adds",
+        "  some back but the net is slightly negative.",
+        "- Every tested model passes loss bit-exact match, confirming these are pure",
+        "  algorithmic wins and not numerical approximations.",
+        "- Models that use `flash_attention_2` work out of the box. Phi-3 fails because",
+        "  transformers 5.x does not yet support FA2 for that architecture (upstream",
+        "  transformers issue, not a MegaTrain-Plus limitation).",
     ]
     out = "docs/suite_summary.md"
     Path(out).write_text("\n".join(lines))

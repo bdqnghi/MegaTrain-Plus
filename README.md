@@ -88,26 +88,30 @@ Both **faster** AND **less GPU memory**. The reason memory goes down: the zero-c
 
 ### Multi-model suite
 
-The same A/B run across 10 public models covering three architectures (Qwen2.5, Qwen3, Llama via SmolLM2) from 360M to 8.2B parameters. Full table in [`docs/suite_summary.md`](docs/suite_summary.md):
+The same A/B run across **12 public models** covering three architectures (Qwen2.5, Qwen3, Llama via SmolLM2) from 360M to **32.76B** parameters. Full table in [`docs/suite_summary.md`](docs/suite_summary.md):
 
-| Model | Params | Δ step time | Δ throughput | Δ backward | Loss match |
-|---|---|---|---|---|---|
-| SmolLM2-360M-Instruct | 0.36B | -22.8% | +29.5% | -36.8% | yes |
-| Qwen2.5-0.5B-Instruct | 0.49B | -26.0% | +35.0% | -38.3% | yes |
-| Qwen3-0.6B | 0.60B | -23.9% | +31.4% | -35.8% | yes |
-| Qwen2.5-1.5B-Instruct | 1.54B | -25.2% | +33.6% | -36.7% | yes |
-| SmolLM2-1.7B-Instruct | 1.71B | -28.9% | +40.6% | -38.5% | yes |
-| Qwen3-1.7B | 1.72B | -26.9% | +36.7% | -39.7% | yes |
-| Qwen2.5-3B-Instruct | 3.09B | -27.6% | +38.0% | -31.5% | yes |
-| Qwen3-4B | 4.02B | -28.1% | +39.1% | -36.4% | yes |
-| Qwen2.5-7B-Instruct | 7.62B | -29.6% | +42.0% | -36.3% | yes |
-| Qwen3-8B | 8.19B | -29.2% | +41.2% | -35.9% | yes |
+| Model | Params | Layers | Δ step time | Δ throughput | Δ backward | Loss match |
+|---|---|---|---|---|---|---|
+| SmolLM2-360M-Instruct | 0.36B | 32 | -22.8% | +29.5% | -36.8% | yes |
+| Qwen2.5-0.5B-Instruct | 0.49B | 24 | -26.0% | +35.0% | -38.3% | yes |
+| Qwen3-0.6B | 0.60B | 28 | -23.9% | +31.4% | -35.8% | yes |
+| Qwen2.5-1.5B-Instruct | 1.54B | 28 | -25.2% | +33.6% | -36.7% | yes |
+| SmolLM2-1.7B-Instruct | 1.71B | 24 | -28.9% | +40.6% | -38.5% | yes |
+| Qwen3-1.7B | 1.72B | 28 | -26.9% | +36.7% | -39.7% | yes |
+| Qwen2.5-3B-Instruct | 3.09B | 36 | -27.6% | +38.0% | -31.5% | yes |
+| Qwen3-4B | 4.02B | 36 | -28.1% | +39.1% | -36.4% | yes |
+| Qwen2.5-7B-Instruct | 7.62B | 28 | -29.6% | +42.0% | -36.3% | yes |
+| Qwen3-8B | 8.19B | 36 | -29.2% | +41.2% | -35.9% | yes |
+| **Qwen2.5-14B-Instruct** | **14.77B** | **48** | **-34.1%** | **+51.9%** | **-42.2%** | **yes** |
+| **Qwen2.5-32B-Instruct** | **32.76B** | **64** | **-12.3%** | **+14.8%** | **-15.5%** | **yes** |
 
-**Across all 10 models:**
-- Step time: mean **-26.8%**, range -29.6% to -22.8%
-- Throughput: mean **+36.7%**, range +29.5% to +42.0%
-- Backward: mean **-36.6%**, range -39.7% to -31.5%
-- **10/10 pass loss bit-exact match.**
+**Across all 12 models:**
+- Step time: mean **-26.2%**, range -34.1% to -12.3%
+- Throughput: mean **+36.2%**, range +14.8% to +51.9%
+- Backward: mean **-35.3%**, range -42.2% to -15.5%
+- **12/12 pass loss bit-exact match.**
+
+The gain scales up through 14B (the sweet spot, where `-34.1%` step and `+51.9%` throughput). It tapers at 32B (`-12.3%`) because at that scale the baseline BWD/FWD ratio drops to ~1.3x - forward itself is so heavy that the eliminated recompute represents a smaller fraction of the total step. It is still a real positive win with bit-exact identical loss.
 
 ### Reproduce
 
@@ -124,15 +128,17 @@ python scripts/benchmark.py --model Qwen/Qwen2.5-7B-Instruct \
     --store-all-activations
 ```
 
-Full multi-model suite:
+Full multi-model suite (12 models, ~30 min total not counting downloads):
 ```bash
 python scripts/benchmark_suite.py \
-    --models "Qwen/Qwen2.5-0.5B-Instruct,Qwen/Qwen2.5-1.5B-Instruct,Qwen/Qwen2.5-3B-Instruct,Qwen/Qwen2.5-7B-Instruct,Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B,Qwen/Qwen3-8B,HuggingFaceTB/SmolLM2-360M-Instruct,HuggingFaceTB/SmolLM2-1.7B-Instruct" \
+    --models "Qwen/Qwen2.5-0.5B-Instruct,Qwen/Qwen2.5-1.5B-Instruct,Qwen/Qwen2.5-3B-Instruct,Qwen/Qwen2.5-7B-Instruct,Qwen/Qwen2.5-14B-Instruct,Qwen/Qwen2.5-32B-Instruct,Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B,Qwen/Qwen3-8B,HuggingFaceTB/SmolLM2-360M-Instruct,HuggingFaceTB/SmolLM2-1.7B-Instruct" \
     --batch-size 2 --seq-len 512 --steps 5
 
 # Regenerate the summary table from existing per-model JSONs
 python scripts/merge_suite_results.py
 ```
+
+> **Note on 32B**: Needs ~100 GB of CPU RAM for weights + slabs + pinned buffers even with `--no-optimizer`. DGX Spark's 128 GB unified memory fits this; smaller systems may need a lower `num_grad_slabs` or a smaller model. 70B and larger do not fit in 128 GB at BF16 master precision.
 
 Additional scaling data across batches and sequence lengths: [`docs/phase3_results.md`](docs/phase3_results.md), [`docs/phase5_results.md`](docs/phase5_results.md).
 
@@ -191,7 +197,11 @@ MegaTrain-Plus inherits universal HuggingFace support from upstream MegaTrain. A
 
 Families that upstream MegaTrain supports: Qwen2/2.5/3/3.5, Qwen3-Next, Llama 2/3/4, Mistral, Mixtral, DeepSeek, Phi-3/4, Gemma 2/3, GLM-4/4.5, InternLM, Yi, Baichuan, GPT-OSS, plus VLMs (Qwen2-VL, Qwen2.5-VL, Qwen3-VL, LLaVA, InternVL, MiniCPM-V, Gemma 3 VL). See [`examples/sft/configs/`](examples/sft/configs/) for ready-made configs.
 
-The MegaTrain-Plus improvements are **validated** on 10 models across three architectures (Qwen2.5, Qwen3, Llama via SmolLM2) from 0.36B to 8.2B. See [`docs/suite_summary.md`](docs/suite_summary.md) for the full table. Every tested model shows a consistent ~25-30% step-time reduction, ~30-40% throughput gain, and bit-exact identical loss. The wins are algorithmic and do not depend on the specific model family.
+The MegaTrain-Plus improvements are **validated** on 12 models across three architectures (Qwen2.5, Qwen3, Llama via SmolLM2) from 0.36B to 32.76B. See [`docs/suite_summary.md`](docs/suite_summary.md) for the full table. 12/12 pass bit-exact loss match. Speedup varies with scale:
+- Small to mid-size (0.36B to 14B): -22 to -34% step time, +29 to +52% throughput
+- Large (32B, 64 layers): -12% step time, +15% throughput (tapers because baseline BWD/FWD ratio drops)
+
+The wins are algorithmic and do not depend on the specific model family.
 
 > **Note:** Phi-3 currently fails on the benchmark because transformers 5.x does not support Flash Attention 2 for that architecture yet. This is an upstream transformers limitation, not a MegaTrain-Plus issue. Phi-3 should work once FA2 support lands upstream, or today with `attn_implementation: "sdpa"`.
 
