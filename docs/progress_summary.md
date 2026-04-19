@@ -24,18 +24,18 @@ Plus = Phase 1A (backward prefetch) + Phase 1B (triple buffer) + Phase 3 (skip r
 
 | Phase | Change | Status | Gain | Ref |
 |---|---|---|---|---|
-| **0** | Reproducible benchmark harness (`scripts/benchmark.py`), baseline established | ✅ | enables everything else | [phase1_results.md](./phase1_results.md) |
-| **1A** | Backward-pass prefetching (previously zero-prefetch) | ✅ | **-2% to -3% step time**, consistent across batch sizes | [phase1_results.md](./phase1_results.md) |
-| **1B** | Configurable `num_buffers` (2/3), triple buffering default | ✅ | No measurable gain at tested scales; correctness preserved; small GPU-mem cost | [phase1_results.md](./phase1_results.md) |
-| **1D** | Root-caused "super-linear backward" as a DataLoader fork artifact; fix applied | ✅ | **fixes the benchmark**, unblocks trustworthy measurements for all future phases; + `persistent_workers=True` in SFT train | [phase1d_results.md](./phase1d_results.md) |
-| **3** | Store all activations; skip backward recompute loop (opt-in) | ✅ | **-30% backward, +25-28% throughput**, bit-exact loss, +150-570 MB GPU | [phase3_results.md](./phase3_results.md) |
-| **5** | Zero-copy unflatten (pointer-swap template params to flat buffer views) | ✅ default-ON | **-8% step, +9% throughput, -440 MB GPU**, bit-exact loss, auto-disabled with FP8 | [phase5_results.md](./phase5_results.md) |
+| **0** | Reproducible benchmark harness (`scripts/benchmark.py`), baseline established | ✅ | enables everything else | [phase1.md](phases/phase1.md) |
+| **1A** | Backward-pass prefetching (previously zero-prefetch) | ✅ | **-2% to -3% step time**, consistent across batch sizes | [phase1.md](phases/phase1.md) |
+| **1B** | Configurable `num_buffers` (2/3), triple buffering default | ✅ | No measurable gain at tested scales; correctness preserved; small GPU-mem cost | [phase1.md](phases/phase1.md) |
+| **1D** | Root-caused "super-linear backward" as a DataLoader fork artifact; fix applied | ✅ | **fixes the benchmark**, unblocks trustworthy measurements for all future phases; + `persistent_workers=True` in SFT train | [phase1d.md](phases/phase1d.md) |
+| **3** | Store all activations; skip backward recompute loop (opt-in) | ✅ | **-30% backward, +25-28% throughput**, bit-exact loss, +150-570 MB GPU | [phase3.md](phases/phase3.md) |
+| **5** | Zero-copy unflatten (pointer-swap template params to flat buffer views) | ✅ default-ON | **-8% step, +9% throughput, -440 MB GPU**, bit-exact loss, auto-disabled with FP8 | [phase5.md](phases/phase5.md) |
 
 ## Shipped but opt-in (not a net win on current hardware)
 
 | Phase | Change | Status | Notes |
 |---|---|---|---|
-| **2** | FP8 E4M3 weight transfer quantization | ✅ opt-in via `weight_transfer_dtype="float8_e4m3"` | Correct, but CPU packing cost (~35 ms/layer) exceeds PCIe savings (~12 ms/layer). Net wall-clock regression on current hardware. See [phase2_results.md](./phase2_results.md) for when it could become net-positive. |
+| **2** | FP8 E4M3 weight transfer quantization | ✅ opt-in via `weight_transfer_dtype="float8_e4m3"` | Correct, but CPU packing cost (~35 ms/layer) exceeds PCIe savings (~12 ms/layer). Net wall-clock regression on current hardware. See [phase2.md](phases/phase2.md) for when it could become net-positive. |
 
 ## Attempted but Wall-Clock Neutral (kept for cleaner code / future leverage)
 
@@ -90,11 +90,11 @@ python scripts/benchmark.py --model Qwen/Qwen2.5-0.5B-Instruct \
     --weight-transfer-dtype float8_e4m3 --no-optimizer
 ```
 
-All JSON outputs are committed under `docs/phase*_*.json`.
+All JSON outputs are committed under `docs/benchmarks/` (grouped by phase).
 
 ## What's Different From the v2 Plan
 
-The [revised plan](./megatrain-plus-plan.md) correctly tempered expectations vs
+The [revised plan](plan/plan.md) correctly tempered expectations vs
 the original v1 plan, but even it overcounted the expected gains from its
 PCIe/transfer-focused improvements:
 

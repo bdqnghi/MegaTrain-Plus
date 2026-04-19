@@ -17,13 +17,13 @@ actual results are:
   limited headroom.
 - One diagnosed "algorithmic bottleneck" (super-linear backward scaling) turned
   out to be a benchmarking artifact from DataLoader worker re-forks (see
-  [phase1d_results.md](./phase1d_results.md)). Corrected via `num_workers=0` in
+  [phase1d.md](../phases/phase1d.md)). Corrected via `num_workers=0` in
   benchmark and `persistent_workers=True` in the training script.
 
 **Reading order**: [progress_summary.md](./progress_summary.md) for the final
-state. The per-phase deep-dive docs are [phase1_results.md](./phase1_results.md),
-[phase1d_results.md](./phase1d_results.md), [phase2_results.md](./phase2_results.md),
-and [phase3_results.md](./phase3_results.md).
+state. The per-phase deep-dive docs are [phase1.md](../phases/phase1.md),
+[phase1d.md](../phases/phase1d.md), [phase2.md](../phases/phase2.md),
+and [phase3.md](../phases/phase3.md).
 
 Keeping this plan document as-is below for historical context.
 

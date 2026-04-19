@@ -109,7 +109,7 @@ python scripts/benchmark.py --model Qwen/Qwen2.5-7B-Instruct \
     --store-all-activations
 ```
 
-JSON outputs committed at `docs/phase3_*.json`.
+JSON outputs committed at `docs/benchmarks/phase3/*.json`.
 
 ## Code Changes
 

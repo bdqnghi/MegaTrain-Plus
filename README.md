@@ -251,7 +251,7 @@ python scripts/merge_suite_results.py
 
 > **Note on 32B**: Needs ~100 GB of CPU RAM for weights + slabs + pinned buffers even with `--no-optimizer`. DGX Spark's 128 GB unified memory fits this; smaller systems may need a lower `num_grad_slabs` or a smaller model. 70B and larger do not fit in 128 GB at BF16 master precision.
 
-Additional scaling data across batches and sequence lengths: [`docs/phase3_results.md`](docs/phase3_results.md), [`docs/phase5_results.md`](docs/phase5_results.md).
+Additional scaling data across batches and sequence lengths: [`docs/phases/phase3.md`](docs/phases/phase3.md), [`docs/phases/phase5.md`](docs/phases/phase5.md).
 
 ## Quick Start
 
@@ -342,21 +342,20 @@ Supports alpaca format, sharegpt format, local JSON/JSONL, and HuggingFace Hub d
 
 ## Documentation
 
-The `docs/` directory is organized as follows:
+Start at [`docs/README.md`](docs/README.md) for the full index. At a glance:
 
-- **[status.md](docs/status.md)**: single source of truth, recommended entry point
-- **[progress_summary.md](docs/progress_summary.md)**: running tally of what's landed
-- **Deep-dives on each improvement**:
-  - [phase1_results.md](docs/phase1_results.md): backward prefetching + triple buffering
-  - [phase1d_results.md](docs/phase1d_results.md): DataLoader fork artifact investigation
-  - [phase2_results.md](docs/phase2_results.md): FP8 weight transfer (why it isn't a win yet)
-  - [phase3_results.md](docs/phase3_results.md): **skip recompute (-30% backward)**
-  - [phase5_results.md](docs/phase5_results.md): **zero-copy unflatten (-8% step, -440 MB)**
-- **Historical context**:
-  - [megatrain-plus-plan.md](docs/megatrain-plus-plan.md): original plan with retrospective
-  - [megatrain-plus-critique.md](docs/megatrain-plus-critique.md): Codex critique of the plan
-  - [gemini_comment.md](docs/gemini_comment.md): Gemini technical analysis
-- **Benchmark JSONs**: ~25 files covering every wall-clock claim made in the docs
+- Entry points: [`status.md`](docs/status.md), [`suite_summary.md`](docs/suite_summary.md), [`progress_summary.md`](docs/progress_summary.md)
+- Deep-dives on each improvement, under [`docs/phases/`](docs/phases/):
+  - [`phase1.md`](docs/phases/phase1.md): backward prefetching + triple buffering
+  - [`phase1d.md`](docs/phases/phase1d.md): DataLoader fork artifact investigation
+  - [`phase2.md`](docs/phases/phase2.md): FP8 weight transfer (why it isn't a win yet)
+  - [`phase3.md`](docs/phases/phase3.md): **skip recompute** (the biggest win)
+  - [`phase5.md`](docs/phases/phase5.md): **zero-copy unflatten** (second biggest)
+- Historical context, under [`docs/plan/`](docs/plan/):
+  - [`plan.md`](docs/plan/plan.md): original plan with retrospective
+  - [`codex-critique.md`](docs/plan/codex-critique.md): Codex critique of the plan
+  - [`gemini-analysis.md`](docs/plan/gemini-analysis.md): Gemini technical analysis
+- Raw benchmark outputs under [`docs/benchmarks/`](docs/benchmarks/) — 64 JSONs grouped by phase and a `suite/` subdir with 24 per-model runs from the 12-model validation
 
 ## Profiling Tools
 
@@ -390,7 +389,7 @@ At large batch or long sequence, the extra activation storage from `store_all_ac
 
 <details><summary><b>First-step latency or random 20-second stalls?</b></summary>
 
-Likely DataLoader worker re-fork. See [phase1d_results.md](docs/phase1d_results.md). Fix already applied in `examples/sft/train.py` (`persistent_workers=True`). For custom training scripts, either match that setting or use `num_workers=0`.
+Likely DataLoader worker re-fork. See [`docs/phases/phase1d.md`](docs/phases/phase1d.md). Fix already applied in `examples/sft/train.py` (`persistent_workers=True`). For custom training scripts, either match that setting or use `num_workers=0`.
 
 </details>
 

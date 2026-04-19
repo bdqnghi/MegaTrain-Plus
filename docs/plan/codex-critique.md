@@ -1,4 +1,4 @@
-# Critique of `megatrain-plus-plan.md`
+# Critique of [`plan.md`](plan.md)
 
 ## Executive Summary
 
@@ -16,7 +16,7 @@ In short: the ideas are plausible, but the plan is overconfident on magnitude, s
 
 ### 1. The bottleneck table is too certain for the evidence shown
 
-The opening sections claim that synchronization, double buffering, PCIe underutilization, and single-GPU support account for a specific `45-67% throughput loss` and assign per-bottleneck loss percentages ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:5), [megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:25)). Those numbers may be directionally correct, but the document does not state:
+The opening sections claim that synchronization, double buffering, PCIe underutilization, and single-GPU support account for a specific `45-67% throughput loss` and assign per-bottleneck loss percentages ([megatrain-plus-plan.md](plan.md:5), [megatrain-plus-plan.md](plan.md:25)). Those numbers may be directionally correct, but the document does not state:
 
 - Which model, batch size, and sequence length were profiled.
 - Whether the measurements came from PyTorch profiler, Nsight Systems, CUDA events, or back-of-the-envelope estimates.
@@ -27,7 +27,7 @@ Without that context, the table creates a false sense of precision. It should be
 
 ### 2. The plan over-multiplies gains from overlapping optimizations
 
-The compound speedup table assumes large multiplicative gains from improvements 1-3, then layers multi-GPU on top ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:329)). That is not a safe assumption.
+The compound speedup table assumes large multiplicative gains from improvements 1-3, then layers multi-GPU on top ([megatrain-plus-plan.md](plan.md:329)). That is not a safe assumption.
 
 Examples of overlap:
 
@@ -39,7 +39,7 @@ The plan should treat these as partially competing optimizations and model best-
 
 ### 3. The implementation schedule is not credible
 
-The proposed schedule budgets roughly 6-9 weeks for fused buffering, custom quantization kernels, async pipeline redesign, NVMe tiering, and parallel multi-GPU work ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:343)). That is optimistic to the point of being misleading.
+The proposed schedule budgets roughly 6-9 weeks for fused buffering, custom quantization kernels, async pipeline redesign, NVMe tiering, and parallel multi-GPU work ([megatrain-plus-plan.md](plan.md:343)). That is optimistic to the point of being misleading.
 
 Even in the current codebase, `CPUMasterModel` already mixes:
 
@@ -55,7 +55,7 @@ as seen in [cpu_master.py](/home/nghibui/codes/MegaTrain/infinity/model/cpu_mast
 
 ### Improvement 1: Fused Multi-Layer GPU Execution
 
-The plan assumes that grouping 2-4 layers is mostly a buffer-sizing problem ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:59)). It is not.
+The plan assumes that grouping 2-4 layers is mostly a buffer-sizing problem ([megatrain-plus-plan.md](plan.md:59)). It is not.
 
 Main issues:
 
@@ -75,7 +75,7 @@ This improvement is plausible, but the plan needs a hard constraint model:
 
 This is the weakest part of the plan.
 
-The document combines at least four numerically meaningful changes into one item ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:90)):
+The document combines at least four numerically meaningful changes into one item ([megatrain-plus-plan.md](plan.md:90)):
 
 - INT4 weight transfer,
 - INT8 gradient transfer,
@@ -96,7 +96,7 @@ This section should be decomposed into separate milestones, starting with the lo
 
 This is probably the strongest idea in the document, but it is still oversold.
 
-The critique here is not that the current code lacks synchronization problems. It clearly has explicit synchronization and a single worker thread today ([cpu_master.py](/home/nghibui/codes/MegaTrain/infinity/model/cpu_master.py:529), [cpu_master.py](/home/nghibui/codes/MegaTrain/infinity/model/cpu_master.py:714), [cpu_master.py](/home/nghibui/codes/MegaTrain/infinity/model/cpu_master.py:982), [cpu_master.py](/home/nghibui/codes/MegaTrain/infinity/model/cpu_master.py:1094)). The problem is that the plan implies triple buffering can collapse the whole system to “only one sync point” ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:180)).
+The critique here is not that the current code lacks synchronization problems. It clearly has explicit synchronization and a single worker thread today ([cpu_master.py](/home/nghibui/codes/MegaTrain/infinity/model/cpu_master.py:529), [cpu_master.py](/home/nghibui/codes/MegaTrain/infinity/model/cpu_master.py:714), [cpu_master.py](/home/nghibui/codes/MegaTrain/infinity/model/cpu_master.py:982), [cpu_master.py](/home/nghibui/codes/MegaTrain/infinity/model/cpu_master.py:1094)). The problem is that the plan implies triple buffering can collapse the whole system to “only one sync point” ([megatrain-plus-plan.md](plan.md:180)).
 
 That is unlikely to be true in a full training step because you still need synchronization boundaries for:
 
@@ -114,9 +114,9 @@ This item should be reframed as “reduce unnecessary synchronization and improv
 
 This section mixes a genuine capacity idea with unrealistic product framing.
 
-The plan says NVMe tiering enables `500B+ parameter models` on a single GPU environment ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:250)). Capacity-wise that may be true on paper. Practically, it risks advertising an unusable operating point:
+The plan says NVMe tiering enables `500B+ parameter models` on a single GPU environment ([megatrain-plus-plan.md](plan.md:250)). Capacity-wise that may be true on paper. Practically, it risks advertising an unusable operating point:
 
-- The per-layer example already implies multi-second NVMe read times ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:232)).
+- The per-layer example already implies multi-second NVMe read times ([megatrain-plus-plan.md](plan.md:232)).
 - The proposed hot-window math leaves little slack for misses, writeback jitter, filesystem behavior, or SSD thermal throttling.
 - Running optimizer updates layer-wise changes failure semantics, checkpointing semantics, and recovery semantics. A crash mid-step is no longer trivial to reason about.
 - `io_uring` plus `O_DIRECT` plus Python orchestration is a non-trivial systems project, not a straightforward extension of the current trainer.
@@ -127,7 +127,7 @@ The plan should describe this as a long-term capacity experiment, not as part of
 
 This is also materially harder than the document suggests.
 
-The plan claims this can be developed in parallel because it is independent of the first four improvements ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:360)). That is not convincing.
+The plan claims this can be developed in parallel because it is independent of the first four improvements ([megatrain-plus-plan.md](plan.md:360)). That is not convincing.
 
 Dependencies and hidden costs:
 
@@ -143,7 +143,7 @@ This should be treated as a separate program, not a parallel track casually atta
 
 ### 1. The plan uses brittle source line references
 
-The document points to exact line numbers in `infinity/model/cpu_master.py` ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:75), [megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:193)). Those references will drift immediately as the file changes. It would be better to refer to methods and logical sections instead.
+The document points to exact line numbers in `infinity/model/cpu_master.py` ([megatrain-plus-plan.md](plan.md:75), [megatrain-plus-plan.md](plan.md:193)). Those references will drift immediately as the file changes. It would be better to refer to methods and logical sections instead.
 
 ### 2. The plan understates how much code is concentrated in one class
 
@@ -155,7 +155,7 @@ The repository already has native CUDA/C++ components under `infinity/cuda_pipel
 
 ## Verification Criticism
 
-The verification section is too weak for the scope of the proposed changes ([megatrain-plus-plan.md](/home/nghibui/codes/MegaTrain/docs/megatrain-plus-plan.md:366)).
+The verification section is too weak for the scope of the proposed changes ([megatrain-plus-plan.md](plan.md:366)).
 
 Problems:
 

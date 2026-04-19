@@ -28,17 +28,17 @@ Plus = defaults shipped in this branch: Phase 1A (backward prefetch), Phase 1B (
 
 | Phase | Change | Gain | Risk | Deep-dive |
 |---|---|---|---|---|
-| **1A** | Backward pass prefetching (recompute + grad loops) | -2 to -3% step time, consistent | None — numerical behavior unchanged | [phase1_results.md](./phase1_results.md) |
-| **1B** | Triple GPU flat buffers (`num_buffers=3`) | Not measurable at tested scales; insurance for regimes where PCIe dominates | ~+440 MB GPU mem per extra buffer | [phase1_results.md](./phase1_results.md) |
-| **5** | Zero-copy unflatten (template params alias flat GPU buffer) | **-8% step time, -440 MB GPU memory** | None — bit-exact loss, auto-disabled with FP8 | [phase5_results.md](./phase5_results.md) |
+| **1A** | Backward pass prefetching (recompute + grad loops) | -2 to -3% step time, consistent | None — numerical behavior unchanged | [phase1.md](phases/phase1.md) |
+| **1B** | Triple GPU flat buffers (`num_buffers=3`) | Not measurable at tested scales; insurance for regimes where PCIe dominates | ~+440 MB GPU mem per extra buffer | [phase1.md](phases/phase1.md) |
+| **5** | Zero-copy unflatten (template params alias flat GPU buffer) | **-8% step time, -440 MB GPU memory** | None — bit-exact loss, auto-disabled with FP8 | [phase5.md](phases/phase5.md) |
 | **1C** | Multi-threaded gradient accumulation (`num_grad_workers=2`) | Within noise at tested scales; insurance for grad-worker-bound regimes | None | — |
 
 ### Opt-in (flip via config)
 
 | Phase | Config flag | Gain | Cost | Deep-dive |
 |---|---|---|---|---|
-| **3** | `store_all_activations: true` | **-25 to -30% backward, +25-30% throughput** | +150-600 MB GPU per batch×seq increase | [phase3_results.md](./phase3_results.md) |
-| **2** | `weight_transfer_dtype: float8_e4m3` | Correct but currently wall-clock NEGATIVE (CPU packing cost exceeds PCIe savings on commodity hw) | CPU overhead ~3.4x baseline copy | [phase2_results.md](./phase2_results.md) |
+| **3** | `store_all_activations: true` | **-25 to -30% backward, +25-30% throughput** | +150-600 MB GPU per batch×seq increase | [phase3.md](phases/phase3.md) |
+| **2** | `weight_transfer_dtype: float8_e4m3` | Correct but currently wall-clock NEGATIVE (CPU packing cost exceeds PCIe savings on commodity hw) | CPU overhead ~3.4x baseline copy | [phase2.md](phases/phase2.md) |
 
 ### Implementation-neutral (kept for clean code; no measurable wall-clock effect)
 
@@ -52,7 +52,7 @@ Plus = defaults shipped in this branch: Phase 1A (backward prefetch), Phase 1B (
 | Phase | Change | Impact |
 |---|---|---|
 | **0** | `scripts/benchmark.py` with `--no-optimizer`, `--num-buffers`, `--no-backward-prefetch`, `--store-all-activations`, `--weight-transfer-dtype`, `--block-timing` flags | All results reproducible; JSONs committed |
-| **1D** | DataLoader `num_workers=0` in benchmark; `persistent_workers=True` in `examples/sft/train.py` | Eliminates 20-second worker-refork stalls on small datasets; made all prior measurements trustworthy | [phase1d_results.md](./phase1d_results.md) |
+| **1D** | DataLoader `num_workers=0` in benchmark; `persistent_workers=True` in `examples/sft/train.py` | Eliminates 20-second worker-refork stalls on small datasets; made all prior measurements trustworthy | [phase1d.md](phases/phase1d.md) |
 
 ## Config
 

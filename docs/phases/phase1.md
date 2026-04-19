@@ -65,13 +65,13 @@ When initially scaling batch size on Qwen2.5-7B seq=512:
 
 Backward appeared to scale super-linearly between batch=2 and batch=4.
 
-**Update from Phase 1D investigation (docs/phase1d_results.md)**: this was a
+**Update from Phase 1D investigation ([phase1d.md](phase1d.md))**: this was a
 benchmarking artifact. The `DataLoader(num_workers=2)` workers re-fork from the
 40+ GB parent process whenever the iterator cycles over the 10-sample demo
 dataset, causing 20+ second stalls that land inside the step timing. With
 `num_workers=0`, backward scales SUBLINEARLY with batch (0.83 ms/token at
 batch=8 vs 2.46 ms/token at batch=2). No algorithmic issue in the backward
-engine. Benchmark fixed in commit; see phase1d_results.md.
+engine. Benchmark fixed in commit; see [phase1d.md](phase1d.md).
 
 ## Code Changes
 
