@@ -77,6 +77,9 @@ class CPUMasterConfig:
     num_grad_slabs: int = 12
     num_buffers: int = 3  # Phase 1B: GPU flat buffer count (2=double, 3=triple buffering)
     backward_prefetch: bool = True  # Phase 1A: prefetch next layer in backward recompute+grad loops
+    # Phase 1C: number of CPU workers for gradient accumulation. 1 = original behavior.
+    # 2-3 helps when grad accumulation takes longer than backward compute.
+    num_grad_workers: int = 2
 
     # Logging
     log_interval: int = 1

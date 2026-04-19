@@ -524,11 +524,19 @@ class CPUMasterModel:
         self.embed_slab_free = threading.Event()
         self.embed_slab_free.set()
 
-        # CPU worker thread for async gradient accumulation
+        # Phase 1C: pool of CPU worker threads for async gradient accumulation.
+        # Workers target disjoint layer parameters (no data race). CPU memory
+        # bandwidth caps the real parallelism at ~2-3 workers on a single socket.
         self.grad_task_queue = queue.Queue()
         self.worker_stop = threading.Event()
-        self.worker_thread = threading.Thread(target=self._grad_worker, daemon=True)
-        self.worker_thread.start()
+        self._num_grad_workers = getattr(config, 'num_grad_workers', 2)
+        self.worker_threads = []
+        for _ in range(self._num_grad_workers):
+            t = threading.Thread(target=self._grad_worker, daemon=True)
+            t.start()
+            self.worker_threads.append(t)
+        # Backward-compat shim for code that references the singular name.
+        self.worker_thread = self.worker_threads[0]
 
         # Initialize events
         logger.info("Initializing buffer state events...")
@@ -1651,6 +1659,7 @@ class CPUMasterModel:
                 p.grad.zero_()
 
     def cleanup(self):
-        """Stop worker thread and cleanup resources."""
+        """Stop grad worker threads and cleanup resources."""
         self.worker_stop.set()
-        self.worker_thread.join(timeout=5.0)
+        for t in getattr(self, 'worker_threads', [self.worker_thread]):
+            t.join(timeout=5.0)
