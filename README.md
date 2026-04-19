@@ -355,7 +355,7 @@ Start at [`docs/README.md`](docs/README.md) for the full index. At a glance:
   - [`plan.md`](docs/plan/plan.md): original plan with retrospective
   - [`codex-critique.md`](docs/plan/codex-critique.md): Codex critique of the plan
   - [`gemini-analysis.md`](docs/plan/gemini-analysis.md): Gemini technical analysis
-- Raw benchmark outputs under [`docs/benchmarks/`](docs/benchmarks/) — 64 JSONs grouped by phase and a `suite/` subdir with 24 per-model runs from the 12-model validation
+- Raw benchmark outputs under [`docs/benchmarks/`](docs/benchmarks/): JSONs grouped by phase, plus a `suite/` subdir with 24 per-model runs from the 12-model validation
 
 ## Profiling Tools
 
