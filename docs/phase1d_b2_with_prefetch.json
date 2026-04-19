@@ -1,0 +1,90 @@
+{
+  "model": "Qwen/Qwen2.5-7B-Instruct",
+  "num_params_B": 7.62,
+  "num_layers": 28,
+  "batch_size": 2,
+  "seq_len": 512,
+  "checkpoint_interval": 4,
+  "num_buffers": 2,
+  "skip_optimizer": true,
+  "steps": [
+    {
+      "step": 0,
+      "loss": 1.506,
+      "tokens": 1024,
+      "step_time_s": 4.467,
+      "fwd_time_s": 1.298,
+      "bwd_time_s": 2.963,
+      "fwd_bwd_total_s": 4.262,
+      "optimizer_time_s": 0.205,
+      "gpu_mem_GB": 7.15,
+      "cpu_mem_GB": 41.37,
+      "grad_norm": null
+    },
+    {
+      "step": 1,
+      "loss": 1.4541,
+      "tokens": 1024,
+      "step_time_s": 3.493,
+      "fwd_time_s": 0.787,
+      "bwd_time_s": 2.501,
+      "fwd_bwd_total_s": 3.289,
+      "optimizer_time_s": 0.204,
+      "gpu_mem_GB": 7.15,
+      "cpu_mem_GB": 41.37,
+      "grad_norm": null
+    },
+    {
+      "step": 2,
+      "loss": 1.4545,
+      "tokens": 1024,
+      "step_time_s": 3.531,
+      "fwd_time_s": 0.792,
+      "bwd_time_s": 2.538,
+      "fwd_bwd_total_s": 3.331,
+      "optimizer_time_s": 0.2,
+      "gpu_mem_GB": 7.15,
+      "cpu_mem_GB": 41.37,
+      "grad_norm": null
+    },
+    {
+      "step": 3,
+      "loss": 1.0799,
+      "tokens": 1024,
+      "step_time_s": 3.526,
+      "fwd_time_s": 0.796,
+      "bwd_time_s": 2.526,
+      "fwd_bwd_total_s": 3.322,
+      "optimizer_time_s": 0.204,
+      "gpu_mem_GB": 7.15,
+      "cpu_mem_GB": 41.37,
+      "grad_norm": null
+    },
+    {
+      "step": 4,
+      "loss": 1.0768,
+      "tokens": 1024,
+      "step_time_s": 3.514,
+      "fwd_time_s": 0.79,
+      "bwd_time_s": 2.518,
+      "fwd_bwd_total_s": 3.308,
+      "optimizer_time_s": 0.206,
+      "gpu_mem_GB": 7.15,
+      "cpu_mem_GB": 41.37,
+      "grad_norm": null
+    }
+  ],
+  "summary": {
+    "avg_step_time_s": 3.516,
+    "avg_fwd_time_s": 0.791,
+    "avg_bwd_time_s": 2.521,
+    "avg_optimizer_time_s": 0.203,
+    "bwd_to_fwd_ratio": 3.19,
+    "fwd_pct": 22.5,
+    "bwd_pct": 71.7,
+    "opt_pct": 5.8,
+    "peak_gpu_GB": 7.15,
+    "peak_cpu_GB": 41.37,
+    "tokens_per_sec": 291.2
+  }
+}

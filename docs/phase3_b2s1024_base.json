@@ -1,0 +1,77 @@
+{
+  "model": "Qwen/Qwen2.5-7B-Instruct",
+  "num_params_B": 7.62,
+  "num_layers": 28,
+  "batch_size": 2,
+  "seq_len": 1024,
+  "checkpoint_interval": 4,
+  "num_buffers": 2,
+  "skip_optimizer": true,
+  "steps": [
+    {
+      "step": 0,
+      "loss": 1.506,
+      "tokens": 2048,
+      "step_time_s": 5.555,
+      "fwd_time_s": 1.434,
+      "bwd_time_s": 3.919,
+      "fwd_bwd_total_s": 5.353,
+      "optimizer_time_s": 0.202,
+      "gpu_mem_GB": 7.55,
+      "cpu_mem_GB": 41.37,
+      "grad_norm": null
+    },
+    {
+      "step": 1,
+      "loss": 1.4541,
+      "tokens": 2048,
+      "step_time_s": 4.626,
+      "fwd_time_s": 0.934,
+      "bwd_time_s": 3.488,
+      "fwd_bwd_total_s": 4.423,
+      "optimizer_time_s": 0.203,
+      "gpu_mem_GB": 7.55,
+      "cpu_mem_GB": 41.37,
+      "grad_norm": null
+    },
+    {
+      "step": 2,
+      "loss": 1.4545,
+      "tokens": 2048,
+      "step_time_s": 4.643,
+      "fwd_time_s": 0.942,
+      "bwd_time_s": 3.49,
+      "fwd_bwd_total_s": 4.433,
+      "optimizer_time_s": 0.21,
+      "gpu_mem_GB": 7.55,
+      "cpu_mem_GB": 41.37,
+      "grad_norm": null
+    },
+    {
+      "step": 3,
+      "loss": 1.0799,
+      "tokens": 2048,
+      "step_time_s": 4.657,
+      "fwd_time_s": 0.951,
+      "bwd_time_s": 3.484,
+      "fwd_bwd_total_s": 4.436,
+      "optimizer_time_s": 0.221,
+      "gpu_mem_GB": 7.55,
+      "cpu_mem_GB": 41.37,
+      "grad_norm": null
+    }
+  ],
+  "summary": {
+    "avg_step_time_s": 4.642,
+    "avg_fwd_time_s": 0.942,
+    "avg_bwd_time_s": 3.487,
+    "avg_optimizer_time_s": 0.211,
+    "bwd_to_fwd_ratio": 3.7,
+    "fwd_pct": 20.3,
+    "bwd_pct": 75.1,
+    "opt_pct": 4.6,
+    "peak_gpu_GB": 7.55,
+    "peak_cpu_GB": 41.37,
+    "tokens_per_sec": 441.2
+  }
+}
