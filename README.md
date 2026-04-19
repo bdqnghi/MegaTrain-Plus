@@ -28,18 +28,20 @@ All measurements in this README and under [`docs/`](docs/) were taken on a singl
 
 | Area | Change | Effect | Default |
 |---|---|---|---|
-| Backward pipeline | Prefetch next layer in the backward recompute and grad loops | -2 to -3% step time | ON |
-| Buffer layout | Configurable GPU flat buffer count, default 3 (triple buffering) | Insurance for PCIe-bound regimes | ON |
-| Grad accumulation | CPU worker pool for gradient accumulation (replaces single thread) | Insurance for grad-worker-bound regimes | ON |
-| Activation memory | Store every layer's input during forward; skip the recompute block in backward | **-25 to -30% backward time** | opt-in |
-| Unflatten | Pointer-swap: template params alias the flat GPU buffer directly, eliminating a ~6 ms/layer memcpy | **-8% step time and -440 MB GPU memory** | ON |
+| Backward pipeline | Prefetch the next layer during the backward recompute and grad loops (upstream only did this in forward) | Removes a small per-layer sync stall; largest gain on configurations where PCIe is the binding constraint | ON |
+| Buffer layout | Configurable GPU flat buffer count, default 3 (triple buffering) | No-op at most scales today; insurance for regimes where the transfer pipeline becomes the bottleneck | ON |
+| Grad accumulation | CPU worker pool for gradient accumulation (replaces the single thread) | No-op at most scales today; insurance for configurations where grad accumulation is on the critical path | ON |
+| **Activation memory** | **Store every layer's input during forward; skip the recompute block in backward.** Eliminates the redundant "forward pass for autograd graph" that the backward pass was otherwise doing | **Largest wall-clock win**: typically the biggest single contributor to the speedup. Trade: extra GPU memory for stored activations | opt-in |
+| **Unflatten** | **Pointer-swap: template params alias the flat GPU buffer directly instead of holding their own copies.** Eliminates the per-layer GPU memcpy that previously populated template storage | Makes forward noticeably faster AND reduces peak GPU memory (one fewer copy of per-layer weights). Rare case where an optimization saves time and memory at once | ON |
 | Hot-path cleanup | `torch._foreach_copy_` fusion plus cached parameter lists | Cleaner, wall-clock neutral | ON |
-| Weight transfer | FP8 E4M3 per-tensor quantization for CPU→GPU weight transfer | Correct but currently wall-clock NEGATIVE on commodity CPUs; kept for slower PCIe / future SIMD paths | opt-in |
+| Weight transfer | FP8 E4M3 per-tensor quantization for CPU→GPU weight transfer | Designed for PCIe-bound discrete-GPU systems. On unified-memory hosts (DGX Spark) the CPU pack cost currently exceeds the non-existent PCIe savings, so it's wall-clock negative. Kept opt-in for future SIMD / slower-PCIe systems | opt-in |
 
 The two biggest wins come from re-reading the hot path and asking *"what work are we doing that isn't actually necessary?"* rather than from PCIe, quantization, or multi-GPU categories:
 
 1. **Skip recompute.** The backward pass was forward-computing each layer twice per step: once in the recompute loop and once again to build an autograd graph. Storing every layer's input during the initial forward lets the backward use those directly.
-2. **Zero-copy unflatten.** Each layer compute was preceded by a 444 MB GPU→GPU memcpy from the flat buffer into a separate template. Pointing the template parameters' `.data` at views of the flat buffer removes the copy entirely and drops peak GPU memory.
+2. **Zero-copy unflatten.** Each layer compute was preceded by a GPU-to-GPU memcpy from the flat buffer into a separate template. Pointing the template parameters' `.data` at views of the flat buffer removes the copy entirely and drops peak GPU memory.
+
+Concrete numbers for each improvement vary by model, batch size, and sequence length. See the [Measured Results](#measured-results) section below for the full multi-model table.
 
 Also included:
 - **Reproducible benchmark harness** (`scripts/benchmark.py`) with A/B toggles for every improvement.
