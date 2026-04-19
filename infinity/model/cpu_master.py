@@ -23,6 +23,8 @@ import queue
 import torch
 import torch.nn as nn
 
+from ..quantization import WeightTransferQuantizer, parse_transfer_dtype
+
 from infinity.config.training import CPUMasterConfig
 
 logger = logging.getLogger(__name__)
@@ -424,16 +426,53 @@ class CPUMasterModel:
 
         # === Phase 1B: N-buffered CPU flat buffers (pinned, sized for max layer) ===
         self.num_buffers = config.num_buffers
+
+        # === Phase 2: transfer quantization ===
+        # When enabled, flat buffers are smaller (e.g. FP8 = 1 B/param vs BF16 = 2 B/param)
+        # and an auxiliary per-param scale buffer travels alongside each H2D transfer.
+        self._transfer_dtype = parse_transfer_dtype(
+            getattr(config, "weight_transfer_dtype", "bfloat16")
+        )
+        self._weight_quantizer = None
+        if self._transfer_dtype is not None:
+            self._weight_quantizer = WeightTransferQuantizer(
+                transfer_dtype=self._transfer_dtype,
+                master_dtype=config.dtype,
+            )
+            logger.info(
+                f"Weight transfer quantization ENABLED: {config.weight_transfer_dtype} "
+                f"(H2D payload approx {self._transfer_dtype.itemsize / config.dtype.itemsize:.1%} of baseline)"
+            )
+            flat_dtype = self._transfer_dtype
+        else:
+            flat_dtype = config.dtype
+
         self.cpu_flat_buffers = [
-            torch.empty(self.max_layer_numel, dtype=config.dtype).pin_memory()
+            torch.empty(self.max_layer_numel, dtype=flat_dtype).pin_memory()
             for _ in range(self.num_buffers)
         ]
 
         # === N-buffered GPU flat params ===
         self.gpu_flat_buffers = [
-            torch.empty(self.max_layer_numel, dtype=config.dtype, device=self.device)
+            torch.empty(self.max_layer_numel, dtype=flat_dtype, device=self.device)
             for _ in range(self.num_buffers)
         ]
+
+        # Per-tensor scale buffers (one FP32 scalar per layer parameter tensor).
+        # Only allocated when quantization is enabled.
+        self._max_params_per_layer = 0
+        self.cpu_scale_buffers = None
+        self.gpu_scale_buffers = None
+        if self._weight_quantizer is not None:
+            self._max_params_per_layer = max(len(n) for n in self.layer_param_numel)
+            self.cpu_scale_buffers = [
+                torch.empty(self._max_params_per_layer, dtype=torch.float32).pin_memory()
+                for _ in range(self.num_buffers)
+            ]
+            self.gpu_scale_buffers = [
+                torch.empty(self._max_params_per_layer, dtype=torch.float32, device=self.device)
+                for _ in range(self.num_buffers)
+            ]
 
         # === GPU layer templates (per structure group, double buffered) ===
         # CRITICAL: Preserve _attn_implementation when moving layers to GPU.
@@ -579,6 +618,11 @@ class CPUMasterModel:
                 del self.gpu_flat_buffers
                 self.gpu_flat_buffers = None
 
+            # Release per-param scale buffers (Phase 2 FP8)
+            if hasattr(self, 'gpu_scale_buffers') and self.gpu_scale_buffers is not None:
+                del self.gpu_scale_buffers
+                self.gpu_scale_buffers = None
+
             # Release GPU layer templates
             if hasattr(self, 'gpu_layer_templates') and self.gpu_layer_templates is not None:
                 del self.gpu_layer_templates
@@ -610,11 +654,17 @@ class CPUMasterModel:
         if not hasattr(self, '_gpu_released') or not self._gpu_released:
             return  # Already have GPU buffers
 
-        # Rebuild N-buffered GPU flat params
+        # Rebuild N-buffered GPU flat params (use transfer dtype if FP8 enabled)
+        flat_dtype = self._transfer_dtype if self._transfer_dtype is not None else self.config.dtype
         self.gpu_flat_buffers = [
-            torch.empty(self.max_layer_numel, dtype=self.config.dtype, device=self.device)
+            torch.empty(self.max_layer_numel, dtype=flat_dtype, device=self.device)
             for _ in range(self.num_buffers)
         ]
+        if self._weight_quantizer is not None and self.gpu_scale_buffers is None:
+            self.gpu_scale_buffers = [
+                torch.empty(self._max_params_per_layer, dtype=torch.float32, device=self.device)
+                for _ in range(self.num_buffers)
+            ]
 
         # Rebuild GPU layer templates
         self.gpu_layer_templates = {}
@@ -718,7 +768,12 @@ class CPUMasterModel:
         self.param_sync_event.record(torch.cuda.current_stream(self.device))
 
     def _load_layer_to_buffer_async(self, layer_idx, buffer_idx):
-        """Load CPU layer params to GPU buffer asynchronously."""
+        """Load CPU layer params to GPU buffer asynchronously.
+
+        Phase 2: when FP8 transfer quantization is enabled, the CPU flat buffer
+        is packed with FP8 payload + per-tensor scales before H2D. The GPU-side
+        unflatten does the inverse cast.
+        """
         self.h2d_done_events[buffer_idx].synchronize()
         self.weight_stream.wait_event(self.buffer_free_events[buffer_idx])
 
@@ -726,16 +781,39 @@ class CPUMasterModel:
         layer = self.cpu_layers[layer_idx]
         layer_numel = self.layer_numels[layer_idx]
 
-        offset = 0
-        for p in layer.parameters():
-            numel = p.numel()
-            cpu_flat[offset:offset + numel].copy_(p.data.flatten())
-            offset += numel
+        if self._weight_quantizer is None:
+            # Baseline: straight BF16 flatten + H2D.
+            offset = 0
+            for p in layer.parameters():
+                numel = p.numel()
+                cpu_flat[offset:offset + numel].copy_(p.data.flatten())
+                offset += numel
+
+            with torch.cuda.stream(self.weight_stream):
+                self.gpu_flat_buffers[buffer_idx][:layer_numel].copy_(
+                    cpu_flat[:layer_numel], non_blocking=True
+                )
+                self.weight_ready_events[buffer_idx].record(self.weight_stream)
+                self.h2d_done_events[buffer_idx].record(self.weight_stream)
+            return
+
+        # FP8 path: quantize on CPU, then H2D both the packed payload and the scales.
+        params = self.layer_cpu_params[layer_idx]
+        numels = self.layer_param_numel[layer_idx]
+        cpu_scales = self.cpu_scale_buffers[buffer_idx]
+        self._weight_quantizer.quantize_layer_cpu(
+            params=params,
+            numels=numels,
+            cpu_flat_fp8=cpu_flat,
+            cpu_scales=cpu_scales,
+        )
 
         with torch.cuda.stream(self.weight_stream):
-            # Only copy the actual layer size, not the full max buffer
             self.gpu_flat_buffers[buffer_idx][:layer_numel].copy_(
                 cpu_flat[:layer_numel], non_blocking=True
+            )
+            self.gpu_scale_buffers[buffer_idx][:len(numels)].copy_(
+                cpu_scales[:len(numels)], non_blocking=True
             )
             self.weight_ready_events[buffer_idx].record(self.weight_stream)
             self.h2d_done_events[buffer_idx].record(self.weight_stream)
@@ -743,8 +821,10 @@ class CPUMasterModel:
     def _unflatten_to_layer(self, layer_idx, buffer_idx):
         """Unflatten GPU buffer to the appropriate layer template parameters.
 
-        After unflatten, the flat buffer is FREE (data copied to template).
-        Template is protected by template_free_events until grad D2H completes.
+        Default path: memcpy the flat buffer into the template params.
+
+        Phase 2 FP8 dequant path: the flat buffer holds INT8/FP8 payload; we
+        dequantize into template params via `WeightTransferQuantizer`.
         """
         flat = self.gpu_flat_buffers[buffer_idx]
         gpu_layer = self._get_gpu_layer(layer_idx, buffer_idx)
@@ -752,11 +832,21 @@ class CPUMasterModel:
         # Wait for template to be free (grad D2H from previous use must complete)
         self.compute_stream.wait_event(self.template_free_events[buffer_idx])
 
-        offset = 0
-        for p in gpu_layer.parameters():
-            numel = p.numel()
-            p.data.copy_(flat[offset:offset + numel].view(p.shape))
-            offset += numel
+        if self._weight_quantizer is None:
+            offset = 0
+            for p in gpu_layer.parameters():
+                numel = p.numel()
+                p.data.copy_(flat[offset:offset + numel].view(p.shape))
+                offset += numel
+        else:
+            numels = self.layer_param_numel[layer_idx]
+            gpu_params = list(gpu_layer.parameters())
+            self._weight_quantizer.dequantize_layer_gpu(
+                gpu_params=gpu_params,
+                numels=numels,
+                gpu_flat_fp8=flat,
+                gpu_scales=self.gpu_scale_buffers[buffer_idx],
+            )
 
         # Flat buffer is now free — template holds its own copy
         self.buffer_free_events[buffer_idx].record(self.compute_stream)

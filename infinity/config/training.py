@@ -81,6 +81,14 @@ class CPUMasterConfig:
     # 2-3 helps when grad accumulation takes longer than backward compute.
     num_grad_workers: int = 2
 
+    # Phase 2: weight transfer quantization (opt-in).
+    # "bfloat16" = no quantization (default)
+    # "float8_e4m3" = FP8 E4M3 per-tensor weight transfer (halves H2D payload).
+    # NOTE: currently wall-clock NEGATIVE on commodity CPUs because the per-layer
+    # FP8 pack cost (~35 ms/layer) exceeds PCIe savings (~12 ms/layer). Kept as
+    # infrastructure for slower PCIe / SIMD-accelerated hosts / amortized variants.
+    weight_transfer_dtype: str = "bfloat16"
+
     # Logging
     log_interval: int = 1
     enable_timing: bool = True
