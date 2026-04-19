@@ -8,9 +8,7 @@
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org/)
 
-**-29.6% step time, +42.0% throughput, -290 MB GPU memory vs the original MegaTrain — with bit-exact identical loss.**
-
-[What's New](#whats-new-vs-upstream-megatrain) | [Quick Start](#quick-start) | [Results](#measured-results) | [Config Reference](#config-reference) | [Docs](#documentation)
+[Improvements](#improvements) | [Quick Start](#quick-start) | [Results](#measured-results) | [Config Reference](#config-reference) | [Docs](#documentation)
 
 </div>
 
@@ -24,28 +22,27 @@ This fork keeps the architecture intact and adds a series of **algorithmic and e
 
 **Both the user-facing API and the YAML config format are backward compatible** — existing MegaTrain configs and scripts work unchanged.
 
-## What's New vs Upstream MegaTrain
+## Improvements
 
-Seven improvements shipped as separate commits with dedicated write-ups:
-
-| # | Improvement | Effect | Default |
+| Area | Change | Effect | Default |
 |---|---|---|---|
-| **1A** | Backward pass prefetching | -2 to -3% step time | ON |
-| **1B** | Configurable triple buffering (`num_buffers=3`) | No measurable gain at tested scales, insurance for PCIe-bound regimes | ON |
-| **1C** | Multi-threaded gradient worker pool | Within noise, insurance | ON |
-| **2** | FP8 E4M3 weight transfer quantization | Correct but currently wall-clock NEGATIVE on commodity CPUs — kept for future use | OFF (opt-in) |
-| **3** | **Store all activations, skip recompute** | **-25-30% backward, +25-30% throughput** | OFF (opt-in) |
-| **4** | `torch._foreach_copy_` fusion + cached param lists | Cleaner, wall-clock neutral | ON |
-| **5** | **Zero-copy unflatten** (pointer-swap to flat buffer views) | **-8% step, -440 MB GPU memory** | ON |
+| Backward pipeline | Prefetch next layer in the backward recompute and grad loops | -2 to -3% step time | ON |
+| Buffer layout | Configurable GPU flat buffer count, default 3 (triple buffering) | Insurance for PCIe-bound regimes | ON |
+| Grad accumulation | CPU worker pool for gradient accumulation (replaces single thread) | Insurance for grad-worker-bound regimes | ON |
+| Activation memory | Store every layer's input during forward; skip the recompute block in backward | **-25 to -30% backward time** | opt-in |
+| Unflatten | Pointer-swap: template params alias the flat GPU buffer directly, eliminating a ~6 ms/layer memcpy | **-8% step time and -440 MB GPU memory** | ON |
+| Hot-path cleanup | `torch._foreach_copy_` fusion plus cached parameter lists | Cleaner, wall-clock neutral | ON |
+| Weight transfer | FP8 E4M3 per-tensor quantization for CPU→GPU weight transfer | Correct but currently wall-clock NEGATIVE on commodity CPUs; kept for slower PCIe / future SIMD paths | opt-in |
 
-The two biggest wins (**Phase 3** and **Phase 5**) came from re-reading the hot path and asking *"what work are we doing that isn't actually necessary?"* — not from the PCIe / quantization / multi-GPU categories one might expect.
+The two biggest wins come from re-reading the hot path and asking *"what work are we doing that isn't actually necessary?"* rather than from PCIe, quantization, or multi-GPU categories:
+
+1. **Skip recompute.** The backward pass was forward-computing each layer twice per step — once in the recompute loop and once again to build an autograd graph. Storing every layer's input during the initial forward lets the backward use those directly.
+2. **Zero-copy unflatten.** Each layer compute was preceded by a 444 MB GPU→GPU memcpy from the flat buffer into a separate template. Pointing the template parameters' `.data` at views of the flat buffer removes the copy entirely and drops peak GPU memory.
 
 Also included:
-- **Reproducible benchmark harness** (`scripts/benchmark.py`) with A/B toggles for every phase.
-- **Four profiling scripts** that isolate specific costs (unflatten memcpy, FP8 pack, backward scaling, quant overhead).
-- **Documented retrospective** comparing plan predictions to measured results in [`docs/status.md`](docs/status.md).
-
-See [`docs/status.md`](docs/status.md) for the single source of truth and [`docs/`](docs/) for per-phase deep-dives.
+- **Reproducible benchmark harness** (`scripts/benchmark.py`) with A/B toggles for every improvement.
+- **Profiling scripts** that isolate specific costs (unflatten memcpy, FP8 pack, backward scaling, quant overhead).
+- **Retrospective** comparing plan predictions to measured results in [`docs/status.md`](docs/status.md).
 
 ## Measured Results
 
